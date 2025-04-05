@@ -96,15 +96,13 @@ client.on("interactionCreate", async (interaction) => {
         const now = moment();
         const formattedTime = now.format("YYYYMMDDHHmm");
 
-        // 轉換為時間戳格式 <t:xxxxx:F>
-        const timestamp = Math.floor(now.valueOf() / 1000); // 取得 Unix 時間戳
-
         // 回應訊息
         const reply = [
             `**!time** - 顯示當前時間`,
             `**!time__+2h__ / !time__-30m__ / !time__+1.5h__** - 計算時間，未輸入單位預設為h`,
             `**!time+3h__F__ / !time-1d__R__** - F 顯示完整時間，R 顯示倒數時間`,
-            `**!time${formattedTime}__T__** - 轉換時區（T=台灣, J=日本, S=瑞典）`,
+            `**!time__T__** - 顯示指定時區時間（T=台灣, J=日本, S=瑞典）`,
+            `**!time__${formattedTime}__T** - 轉換指定時區時間`,
             `**!time...__!__** - 顯示時間戳`
         ].join("\n");
         await interaction.reply(reply);

@@ -68,20 +68,6 @@ const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN);
     }
 })();
 
-// 啟動 Express Web 伺服器
-const app = express();
-const port = process.env.PORT || 3000; // Replit 通常會使用 PORT
-
-// 設定首頁路由
-app.get("/", (req, res) => {
-    res.send("サポちゃん大地に立つ!!");
-});
-
-// 啟動 Web 伺服器
-app.listen(port, () => {
-    console.log(`Web server running on port ${port}`);
-});
-
 // 啟動 Discord Bot
 client.once("ready", () => {
     console.log(`✅ 已登入為 ${client.user.tag}`);

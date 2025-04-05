@@ -1,0 +1,153 @@
+const { Client, GatewayIntentBits, REST, Routes } = require('discord.js');
+const moment = require('moment-timezone');
+require('dotenv').config(); 
+
+const client = new Client({ 
+    intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.MessageContent
+    ] 
+});
+
+const CLIENT_ID = process.env.CLIENT_ID; 
+const GUILD_ID = process.env.GUILD_ID; 
+const TOKEN = process.env.DISCORD_TOKEN; 
+
+const commands = [
+    {
+        name: 'help',
+        description: 'サポちゃん的指令說明！！'
+    }
+];
+
+const rest = new REST({ version: '10' }).setToken(TOKEN);
+
+// 註冊 Slash Command
+(async () => {
+    try {
+        console.log('正在註冊 Slash Commands...');
+        // 刪除舊的命令，並重新註冊所有命令
+        await rest.put(
+            Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
+            { body: commands }
+        );
+        console.log('Slash Commands 註冊成功!');
+    } catch (error) {
+        console.error(error);
+    }
+})();
+
+client.once('ready', () => {
+    console.log(`✅ 已登入為 ${client.user.tag}`);
+    // 清除舊指令並重新註冊
+});
+
+// 處理 Slash Command `/help`
+client.on('interactionCreate', async interaction => {
+    if (!interaction.isCommand()) return;
+
+    if (interaction.commandName === 'help') {
+
+
+        // 取得當前時間並格式化為 YYYYMMDDHHMM 格式
+        const now = moment();
+        const formattedTime = now.format('YYYYMMDDHHmm');
+
+        // 轉換為時間戳格式 <t:xxxxx:F>
+        const timestamp = Math.floor(now.valueOf() / 1000); // 取得 Unix 時間戳
+
+        // 回應訊息
+        await interaction.reply(
+`**!time** - 顯示當前時間。
+**!time+2d / !time-30m / !time+1.5h** - 計算時間，未輸入單位預設為小時。
+**!time+3hF / !time-1dR** - F 顯示完整時間，R 顯示倒數時間。
+**!time${formattedTime}T** - 時區轉換 <t:${timestamp}:F>。
+`);
+    }
+});
+
+// 監聽 `!time...`
+client.on('messageCreate', async (message) => {
+    if (message.author.bot) return; // 忽略 Bot 自己的訊息
+
+    const content = message.content;
+
+    // **處理運算時間**
+    const regex = /!time([+-]\d+(\.\d+)?)(h|m|d)?(F|R)?/i;
+    const match = content.match(regex);
+
+    if (match) {
+        let amount = parseFloat(match[1]);
+        const unit = match[3] || 'h';
+        let formatType = match[4] || 't';
+        if (formatType !== 't') {
+            formatType = formatType.toUpperCase();
+        }
+
+        let newTime = moment();
+        if (unit === 'h') newTime.add(amount, 'hours');
+        else if (unit === 'm') newTime.add(amount, 'minutes');
+        else if (unit === 'd') newTime.add(amount, 'days');
+
+        const timestamp = Math.floor(newTime.valueOf() / 1000);
+
+        const replyContent = content.replace(regex, `<t:${timestamp}:${formatType}>`);
+        await message.reply(replyContent);
+        return;
+    }
+
+/*
+    // **處理指定時間轉時間戳**
+    const timeRegex = /!time(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})/;
+    const timeMatch = content.match(timeRegex);
+    if (timeMatch) {
+        const [_, year, month, day, hour, minute] = timeMatch;
+        const newTime = moment.tz(`${year}-${month}-${day} ${hour}:${minute}`, 'YYYY-MM-DD HH:mm', 'Asia/Taipei');
+        const timestamp = Math.floor(newTime.valueOf() / 1000);
+        const replyContent = content.replace(timeRegex, `<t:${timestamp}:F>`);
+
+        await message.reply(replyContent);
+        return;
+    }
+*/
+    // **處理指定時間轉時間戳** (根據後綴 T/J/S 判斷時區)
+    const timeRegex = /!time(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(T|J|S)?/;
+    const timeMatch = content.match(timeRegex);
+
+    if (timeMatch) {
+        const [_, year, month, day, hour, minute, timezone] = timeMatch;
+
+        // 根據後綴判斷時區
+        let userTimezone = 'Asia/Taipei'; // 預設為台灣
+        if (timezone === 'J') {
+            userTimezone = 'Asia/Tokyo'; // 日本時區
+        } else if (timezone === 'S') {
+            userTimezone = 'Europe/Stockholm'; // 瑞典時區
+        }
+
+        try {
+            // 根據使用者的時區設置時間
+            const newTime = moment.tz(`${year}-${month}-${day} ${hour}:${minute}`, 'YYYY-MM-DD HH:mm', userTimezone);
+
+            // 轉換為 Discord 時間戳格式
+            const timestamp = Math.floor(newTime.valueOf() / 1000);
+            const replyContent = `<t:${timestamp}:F>`; // 顯示完整時間戳
+
+            await message.reply(replyContent);
+        } catch (error) {
+            console.error("處理時間時發生錯誤:", error);
+            await message.reply("無效的時間格式。請檢查輸入並重試。");
+        }
+        return;
+    }
+
+    // **處理單純 !time 顯示當前時間**
+    if (content.includes('!time')) {
+        const timestamp = Math.floor(Date.now() / 1000);
+        const replyContent = content.replace('!time', `<t:${timestamp}:t>`);
+        await message.reply(replyContent);
+    }
+});
+
+client.login(TOKEN);

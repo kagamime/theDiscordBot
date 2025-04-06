@@ -133,6 +133,14 @@ client.on("messageCreate", async (message) => {
 
     const content = message.content;
 
+    // 捕獲中止命令
+    if (content.includes("!stopTheDiscordBot")) {
+        await message.reply("おやすみなさい。");
+        console.log("Bot 停止中...");
+        client.destroy(); // 停止 Discord Bot
+        process.exit(0); // 終止程式
+    }
+
     // 處理符合關鍵字的命令
     await Promise.all([
         handleCommand(content, message, "!time", theTimestamp),

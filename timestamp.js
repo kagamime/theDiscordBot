@@ -14,9 +14,12 @@ export function theTimestamp(content) {
         // 遍歷比對正則
         for (const [regex, handler] of rules) {
             const match = content.match(regex);
-            if (match) return handler(content, match);
+            if (match) {
+                content = handler(content, match);
+                break;
+            }
         }
-    } while (content.includes("!time"));
+    } while (content.includes('!time'));
     return content;
 }
 

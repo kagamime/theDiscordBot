@@ -7,12 +7,16 @@ const rules = [
     [/!time(!)?/, parseTimestampCommand] //!time
 ];
 
-// 遍歷比對 !time 正則
+// 統一處理 !time 指令
 export function theTimestamp(content) {
-    for (const [regex, handler] of rules) {
-        const match = content.match(regex);
-        if (match) return handler(content, match);
-    }
+
+    do {
+        // 遍歷比對正則
+        for (const [regex, handler] of rules) {
+            const match = content.match(regex);
+            if (match) return handler(content, match);
+        }
+    } while (content.includes("!time"));
     return content;
 }
 

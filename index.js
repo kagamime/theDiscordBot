@@ -98,42 +98,46 @@ client.on("interactionCreate", async (interaction) => {
         const formattedTime = now.format("YYYYMMDDHHmm");
 
         // 回應訊息
-        const reply = [
-            `>>> **!time** - 顯示當前時間`,
-            `**!time__+2h__ / !time__-30m__ / !time__+1.5h__** - 計算時間，未輸入單位預設為h`,
-            `**!time+3h__F__ / !time-1d__R__** - F 顯示完整時間，R 顯示倒數時間`,
-            `**!time__T__** - 顯示指定時區時間（T=台灣, J=日本, S=瑞典）`,
-            `**!time__${formattedTime}__T** - 轉換指定時區時間`,
-            `**!time...__!__** - 顯示時間戳`
-        ].join("\n");
+        const reply = `
+**___!time___**
+> **!time** - 顯示當前時間
+> **!time__+2h__ / !time__-30m__ / !time__+1.5h__** - 計算時間，未輸入單位預設為h
+> **!time+3h__F__ / !time-1d__R__** - F 顯示完整時間，R 顯示倒數時間
+> **!time__T__** - 顯示指定時區時間（T=台灣, J=日本, S=瑞典
+> **!time__${formattedTime}__T** - 轉換指定時區時間
+> **!time...__!__** - 顯示時間戳
+**___!dice___**
+> **!dice__3d6__ / !dice__1d100__** - 擲骰
+`;
+
         await interaction.reply(reply);
     }
 });
 
+// 通用回覆處理函式
+async function handleCommand(content, message, keyword, commandHandler) {
+    // 排除處理反引號包裹的指令
+    const regex = new RegExp(`\\\`[^\\\`]*${keyword}[^\\\`]*\\\``);
+    if (regex.test(content)) return;
+
+    if (content.includes(keyword)) {
+        const result = commandHandler(content);
+        if (result) await message.reply(result);
+    }
+}
+
 // 監聽 keywords
 client.on("messageCreate", async (message) => {
-    if (message.author.bot) return; // 忽略 Bot 自己的訊息
+    // 忽略 Bot 自己的訊息
+    if (message.author.bot) return;
 
     const content = message.content;
 
-    // 通用回覆處理函式
-    async function handleCommand(content, commandHandler) {
-        const result = commandHandler(content);
-        if (result) {
-            await message.reply(result);
-        }
-    }
-
-    //!time...
-    if (content.includes("!time")) {
-        await handleCommand(content, theTimestamp);
-    }
-
-    //!dice...
-    if (content.includes("!dice")) {
-        await handleCommand(content, rollDice);
-    }
-
+    // 處理符合關鍵字的命令
+    await Promise.all([
+        handleCommand(content, message, "!time", theTimestamp),
+        handleCommand(content, message, "!dice", rollDice)
+    ]);
 });
 
 client.login(process.env.DISCORD_TOKEN);

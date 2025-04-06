@@ -1,5 +1,6 @@
 import { Client, GatewayIntentBits, REST, Routes } from "discord.js";
-import { theTimestamp } from "./timestamp.js"; // 從 timestamp.js 拉入 theTimestamp 函式
+import { theTimestamp } from "./timestamp.js";
+import { rollDice } from "./misc.js";
 import moment from "moment-timezone";
 import express from "express";
 import dotenv from "dotenv";
@@ -115,13 +116,24 @@ client.on("messageCreate", async (message) => {
 
     const content = message.content;
 
-    //!time...
-    if (content.includes("!time")) {
-        const result = theTimestamp(content); // 將訊息傳入 theTimestamp 函式處理
+    // 通用回覆處理函式
+    async function handleCommand(content, commandHandler) {
+        const result = commandHandler(content);
         if (result) {
-            await message.reply(result); // 回應處理結果
+            await message.reply(result);
         }
     }
+
+    //!time...
+    if (content.includes("!time")) {
+        await handleCommand(content, theTimestamp);
+    }
+
+    //!dice...
+    if (content.includes("!dice")) {
+        await handleCommand(content, rollDice);
+    }
+
 });
 
 client.login(process.env.DISCORD_TOKEN);

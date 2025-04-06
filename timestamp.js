@@ -7,8 +7,8 @@ const rules = [
     [/!time(!)?/, parseTimestampCommand] //!time
 ];
 
-// 遍歷 !time 正則
-function theTimestamp(content) {
+// 遍歷比對 !time 正則
+export function theTimestamp(content) {
     for (const [regex, handler] of rules) {
         const match = content.match(regex);
         if (match) return handler(content, match);
@@ -66,5 +66,3 @@ function parseTimestampCommand(content, match) {
     const now = Math.floor(Date.now() / 1000);
     return content.replace(match[0], match[1] ? `\`<t:${now}:t>\`` : `<t:${now}:t>`);
 }
-
-export { theTimestamp };

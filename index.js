@@ -25,7 +25,7 @@ app.get("/", (req, res) => {
 
 // 啟動 Web 伺服器
 app.listen(port, () => {
-    console.log(`Web server running on port ${port}`);
+    console.log(`[INFO]Web Server正在埠 ${port} 運行`);
 });
 
 // 初始化 REST 客戶端
@@ -34,7 +34,7 @@ const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN);
 // 註冊 Slash Command
 (async () => {
     try {
-        console.log("刪除舊Slash Commands...");
+        console.log("[INFO]刪除舊Slash Commands...");
 
         // 拉取目前伺服器中的所有命令
         const existingCommands = await rest.get(
@@ -53,10 +53,10 @@ const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN);
                     command.id,
                 ),
             );
-            console.log("刪除命令：" + command.name);
+            console.log("[INFO]刪除命令：" + command.name);
         }
 
-        console.log("重新註冊Slash Commands...");
+        console.log("[INFO]重新註冊Slash Commands...");
 
         // 註冊新的命令
         await rest.put(
@@ -69,7 +69,7 @@ const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN);
             },
         );
 
-        console.log("Slash Commands 註冊成功!");
+        console.log("[INFO]Slash Commands 註冊成功!");
     } catch (error) {
         console.error(error);
     }
@@ -77,7 +77,33 @@ const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN);
 
 // 啟動 Discord Bot
 client.once("ready", () => {
-    console.log(`✅ 已登入為 ${client.user.tag}`);
+    console.log(`[INFO]✅ 已登入為 ${client.user.tag}`);
+});
+
+// 監聽 SIGTERM 訊號（Render 停止服務時會發送此信號）
+let isStoppingBot = false;
+process.on('SIGTERM', async () => {
+    // 如果 !stopTheDiscordBot 則跳過重啟
+    if (isStoppingBot) return;
+
+    console.log('[INFO]已收到 SIGTERM 訊號，正在開始重啟程序...');
+
+    try {
+        const response = await fetch(process.env.DEPLOY_HOOK_URL, {
+            method: 'POST',  // HTTP 方法
+            headers: { 'Content-Type': 'application/json' },  // 如果需要的話，可以添加 header
+            body: JSON.stringify({ message: "Deploy triggered by SIGTERM" })  // 如果需要的話，可以傳送資料
+        });
+
+        if (response.ok) {
+            console.log('[INFO]成功觸發部署');
+        } else {
+            console.error('[ERROR]觸發部署時出錯');
+        }
+    } catch (err) {
+        console.error('[ERROR]無法觸發部署', err);
+    }
+    process.exit(0);
 });
 
 // 定義 Slash 命令列表
@@ -106,8 +132,9 @@ client.on("messageCreate", async (message) => {
 
     // 捕獲中止命令
     if (content.includes("!stopTheDiscordBot") && message.member.roles.cache.has(process.env.ROLE_ID)) {
+        isStoppingBot = true;
         await message.reply("おやすみなさい。");
-        console.log("Bot 停止中...");
+        console.log("[INFO]theDiscordBot 停止中...");
         client.destroy(); // 停止 Discord Bot
         process.exit(0); // 終止程式
     }
@@ -119,7 +146,7 @@ client.on("messageCreate", async (message) => {
     ]);
 });
 
-// 通用回覆處理函式
+// 通用 keywords 回覆處理函式
 async function handleCommand(content, message, keyword, commandHandler) {
     // 排除處理反引號包裹的指令
     const regex = new RegExp(`\\\`[^\\\`]*${keyword}[^\\\`]*\\\``);
@@ -127,30 +154,11 @@ async function handleCommand(content, message, keyword, commandHandler) {
 
     if (content.includes(keyword)) {
         const result = commandHandler(content);
-        if (result) await message.reply(result);
+        if (result) {
+            await message.reply(result);
+            console.log(`[${keyword}]${result}`);
+        }
     }
 }
-
-// 監聽 SIGTERM 信號（Render 停止服務時會發送此信號）
-process.on('SIGTERM', async () => {
-    console.log('SIGTERM信号を受け取りました。再起動プロセスを開始します......');
-
-    try {
-        const response = await fetch(process.env.DEPLOY_HOOK_URL, {
-            method: 'POST',  // HTTP 方法
-            headers: { 'Content-Type': 'application/json' },  // 如果需要的話，可以添加 header
-            body: JSON.stringify({ message: "Deploy triggered by SIGTERM" })  // 如果需要的話，可以傳送資料
-        });
-        
-        if (response.ok) {
-            console.log('成功觸發部署');
-        } else {
-            console.error('觸發部署時出錯');
-        }
-    } catch (err) {
-        console.error('錯誤：無法觸發部署', err);
-    }
-    process.exit(0);
-});
 
 client.login(process.env.DISCORD_TOKEN);

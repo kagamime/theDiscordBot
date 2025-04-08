@@ -105,7 +105,7 @@ client.on("messageCreate", async (message) => {
     const content = message.content;
 
     // 捕獲中止命令
-    if (content.includes("!stopTheDiscordBot")) {
+    if (content.includes("!stopTheDiscordBot") && message.member.roles.cache.has(process.env.ROLE_ID)) {
         await message.reply("おやすみなさい。");
         console.log("Bot 停止中...");
         client.destroy(); // 停止 Discord Bot
@@ -130,5 +130,16 @@ async function handleCommand(content, message, keyword, commandHandler) {
         if (result) await message.reply(result);
     }
 }
+
+// 監聽程式退出事件
+process.on('exit', async (code) => {
+    console.log('Botは非アクティブ状態または終了によりシャットダウンします。終了コード:', code);
+});
+
+// 監聽 SIGTERM 信號（Render 停止服務時會發送此信號）
+process.on('SIGTERM', async () => {
+    console.log('SIGTERM信号を受け取りました。シャットダウン中...');
+    process.exit(0);
+});
 
 client.login(process.env.DISCORD_TOKEN);

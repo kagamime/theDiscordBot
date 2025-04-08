@@ -2,8 +2,8 @@ import moment from "moment-timezone";
 
 const rules = [
     [/!time([+-]\d+(\.\d+)?)(h|m|d)?([fr])?(!)?/i, parseOffsetTimeCommand], //!time+1.5hF
-    [/!time(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})([TJS])?(r)?(!)?/i, parseFixedTimeCommand], //!timeYYYYMMDDHHmmT
-    [/!time([TJS])/i, parseTimezoneCommand], //!timeT
+    [/!time(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(TW|JP|SE)?(r)?(!)?/i, parseFixedTimeCommand], //!timeYYYYMMDDHHmmTW
+    [/!time(TW|JP|SE)/i, parseTimezoneCommand], //!timeTW
     [/!time(!)?/, parseTimestampCommand] //!time
 ];
 
@@ -39,7 +39,7 @@ function parseOffsetTimeCommand(content, match) {
 function parseFixedTimeCommand(content, match) {
     const [_, year, month, day, hour, minute, zoneFlag, formatFlagRaw, exclamationFlag] = match;
 
-    const zones = { T: "Asia/Taipei", J: "Asia/Tokyo", S: "Europe/Stockholm" };
+    const zones = { TW: "Asia/Taipei", JP: "Asia/Tokyo", SE: "Europe/Stockholm" };
     const zone = zones[zoneFlag?.toUpperCase()] || null;
     if (!zone) return null;
 
@@ -55,11 +55,11 @@ function parseFixedTimeCommand(content, match) {
 // 轉換為指定時區時間
 function parseTimezoneCommand(content, match) {
     const timezoneCommands = {
-        T: { zone: "Asia/Taipei", label: "_tw" },
-        J: { zone: "Asia/Tokyo", label: "_jp" },
-        S: { zone: "Europe/Stockholm", label: "_se" }
+        TW: { zone: "Asia/Taipei", label: "_tw" },
+        JP: { zone: "Asia/Tokyo", label: "_jp" },
+        SE: { zone: "Europe/Stockholm", label: "_se" }
     };
-    const timezoneInfo = timezoneCommands[match[1]];
+    const timezoneInfo = timezoneCommands[match[1].toUpperCase()];
     if (!timezoneInfo) return null;
 
     const now = moment.tz(timezoneInfo.zone);

@@ -82,7 +82,7 @@ client.once("ready", () => {
 
 // 監聽 SIGTERM 訊號（Render 停止服務時會發送此信號）
 let isStoppingBot = false;
-process.on('SIGTERM', async () => {
+/* process.on('SIGTERM', async () => {
     // 如果 !stopTheDiscordBot 則跳過重啟
     if (isStoppingBot) return;
 
@@ -104,7 +104,7 @@ process.on('SIGTERM', async () => {
         console.error('[ERROR]無法觸發部署', err);
     }
     process.exit(0);
-});
+}); */
 
 // 定義 Slash 命令列表
 const theCommands = [
@@ -131,7 +131,7 @@ client.on("messageCreate", async (message) => {
     const content = message.content;
 
     // 捕獲中止命令
-    if (content.includes("!stopTheDiscordBot") && message.member.roles.cache.has(process.env.ROLE_ID)) {
+    if (content.includes("!stopTheDiscordBot") && message.member.roles.cache.has(process.env.ADMIN_ROLE_ID)) {
         isStoppingBot = true;
         await message.reply("おやすみなさい。");
         console.log("[INFO]theDiscordBot 停止中...");

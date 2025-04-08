@@ -38,5 +38,5 @@ export function rollDice(content) {
     // 計算總和
     const total = rolls.reduce((a, b) => a + b, 0);
 
-    return content.replace(match[0], `\`[${rolls.join(", ")}]:(${total})\``);
+    return content.replace(match[0], `\`[${rolls.join(", ")}]=>(${total})\``);
 }

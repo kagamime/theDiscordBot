@@ -131,14 +131,25 @@ async function handleCommand(content, message, keyword, commandHandler) {
     }
 }
 
-// 監聽程式退出事件
-process.on('exit', async (code) => {
-    console.log('Botは非アクティブ状態または終了によりシャットダウンします。終了コード:', code);
-});
-
 // 監聽 SIGTERM 信號（Render 停止服務時會發送此信號）
 process.on('SIGTERM', async () => {
-    console.log('SIGTERM信号を受け取りました。シャットダウン中...');
+    console.log('SIGTERM信号を受け取りました。再起動プロセスを開始します......');
+
+    try {
+        const response = await fetch(process.env.DEPLOY_HOOK_URL, {
+            method: 'POST',  // HTTP 方法
+            headers: { 'Content-Type': 'application/json' },  // 如果需要的話，可以添加 header
+            body: JSON.stringify({ message: "Deploy triggered by SIGTERM" })  // 如果需要的話，可以傳送資料
+        });
+        
+        if (response.ok) {
+            console.log('成功觸發部署');
+        } else {
+            console.error('觸發部署時出錯');
+        }
+    } catch (err) {
+        console.error('錯誤：無法觸發部署', err);
+    }
     process.exit(0);
 });
 

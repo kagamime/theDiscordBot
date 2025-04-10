@@ -5,6 +5,8 @@ import express from "express";
 import dotenv from "dotenv";
 dotenv.config();
 
+console.log("___________________________________");
+
 // 建立 Discord client 實例
 const client = new Client({
     intents: [
@@ -198,7 +200,7 @@ async function handleCommand(content, message, keyword, commandHandler) {
         const result = commandHandler(content);
         if (result) {
             await message.reply(result);
-            console.log(`[REPLY]${message.author.username}> ${result}`);
+            console.log(`[REPLY]${message.author.tag}> ${result}`);
         }
     }
 }

@@ -17,7 +17,6 @@ const client = new Client({
 // 啟動 Express Web 伺服器
 const app = express();
 const port = process.env.PORT || 3000;
-process.env.IS_STOPPING_BOT = 'false';
 
 // 啟動 Web 伺服器
 app.listen(port, () => {
@@ -90,9 +89,10 @@ client.once("ready", () => {
 });
 
 // 監聽 SIGTERM 訊號（Render 停止服務時會發送此信號）
+let isStoppingBot = false;
 process.on('SIGTERM', async () => {
     // !stopTheDiscordBot 則跳過重啟
-    if (process.env.IS_STOPPING_BOT) return;
+    if (isStoppingBot) return;
 
     console.log('[INFO]已收到 SIGTERM 訊號，正在開始重啟程序...');
 
@@ -126,7 +126,7 @@ const theCommands = [
 // 監聽 Slash Command
 client.on("interactionCreate", async (interaction) => {
     // !stopTheDiscordBot 後進入假眠
-    if (process.env.IS_STOPPING_BOT) return;
+    if (isStoppingBot) return;
 
     if (!interaction.isCommand()) return;
 
@@ -138,7 +138,7 @@ client.on("interactionCreate", async (interaction) => {
 // 監聽 keywords
 client.on("messageCreate", async (message) => {
     // !stopTheDiscordBot 後進入假眠
-    if (process.env.IS_STOPPING_BOT) return;
+    if (isStoppingBot) return;
 
     // 忽略 Bot 自己的訊息
     if (message.author.bot) return;
@@ -147,7 +147,7 @@ client.on("messageCreate", async (message) => {
 
     // 捕獲中止命令 !stopTheDiscordBot
     if (content.includes("!stopTheDiscordBot") && message.member.roles.cache.has(process.env.ADMIN_ROLE_ID)) {
-        process.env.IS_STOPPING_BOT = 'true'; // 設置環境變數標誌
+        isStoppingBot = 'true';
         await message.reply("おやすみなさい。");
         console.log("[INFO]theDiscordBot 停止中...");
         client.destroy(); // 停止 Discord Bot

@@ -89,10 +89,9 @@ client.once("ready", () => {
 });
 
 // 監聽 SIGTERM 訊號（Render 停止服務時會發送此信號）
-let isStoppingBot = false;
 process.on('SIGTERM', async () => {
     // !stopTheDiscordBot 則跳過重啟
-    if (isStoppingBot) return;
+    if (process.env.IS_STOPPING_BOT) return;
 
     console.log('[INFO]已收到 SIGTERM 訊號，正在開始重啟程序...');
 
@@ -111,7 +110,8 @@ process.on('SIGTERM', async () => {
     } catch (err) {
         console.error('[ERROR]無法觸發部署', err);
     }
-    process.exit(0);
+
+    return;
 });
 
 // 定義 Slash 命令列表
@@ -125,7 +125,7 @@ const theCommands = [
 // 監聽 Slash Command
 client.on("interactionCreate", async (interaction) => {
     // !stopTheDiscordBot 後進入假眠
-    if (isStoppingBot) return;
+    if (process.env.IS_STOPPING_BOT) return;
 
     if (!interaction.isCommand()) return;
 
@@ -137,7 +137,7 @@ client.on("interactionCreate", async (interaction) => {
 // 監聽 keywords
 client.on("messageCreate", async (message) => {
     // !stopTheDiscordBot 後進入假眠
-    if (isStoppingBot) return;
+    if (process.env.IS_STOPPING_BOT) return;
 
     // 忽略 Bot 自己的訊息
     if (message.author.bot) return;
@@ -146,14 +146,14 @@ client.on("messageCreate", async (message) => {
 
     // 捕獲中止命令 !stopTheDiscordBot
     if (content.includes("!stopTheDiscordBot") && message.member.roles.cache.has(process.env.ADMIN_ROLE_ID)) {
-        isStoppingBot = true;
+        process.env.IS_STOPPING_BOT = 'true'; // 設置環境變數標誌
         await message.reply("おやすみなさい。");
         console.log("[INFO]theDiscordBot 停止中...");
-        client.destroy(); // 停止 Discord Bot
-        server.close(() => {
+        await client.destroy(); // 停止 Discord Bot
+        app.close(() => {
             console.log("[INFO]Web Server 已關閉");
         });
-        rewturn; // 用 process.exit(0) 會被render重啟
+        return; // 不用 process.exit(0) 會被render重啟
     }
 
     // 處理符合關鍵字的命令

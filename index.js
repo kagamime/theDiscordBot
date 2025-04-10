@@ -17,6 +17,7 @@ const client = new Client({
 // 啟動 Express Web 伺服器
 const app = express();
 const port = process.env.PORT || 3000;
+process.env.IS_STOPPING_BOT = 'false';
 
 // 啟動 Web 伺服器
 app.listen(port, () => {

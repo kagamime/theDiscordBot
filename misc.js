@@ -6,6 +6,8 @@ export async function slashHelp(interaction) {
     const formattedTime = now.format("YYYYMMDDHHmm");
 
     const reply = `
+**__/help__** - サポちゃん的支援說明！！
+**__/ask__** - 提問！！ サポちゃん會想辦法回答！！
 **___!time___**
 > **!time** - 顯示當前時間
 > **!time__+2h__ / !time__-30m__ / !time__+1.5h__** - 計算時間，未輸入單位預設為h

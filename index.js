@@ -154,11 +154,12 @@ client.on("interactionCreate", async (interaction) => {
     if (!interaction.isCommand()) return;
 
     if (interaction.commandName === "help") {
+        console.log(`[REPLY]${interaction.user.tag}> 觸發了 /help`);
         await slashHelp(interaction);
     }
 });
 
-// 監聽 keywords
+// 監聽 Keywords
 client.on("messageCreate", async (message) => {
     // !stopTheDiscordBot 後進入假眠
     if (isStoppingBot) return;

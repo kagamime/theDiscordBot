@@ -98,6 +98,19 @@ client.once("ready", () => {
     console.log(`[INFO]✅ 已登入為 ${client.user.tag}`);
 });
 
+// 重寫 console.log，使其同時發送到 Discord
+const originalLog = console.log;
+console.log = async (...args) => {
+    const channel = await client.channels.fetch(process.env.LOG_CHANNEL_ID);
+    if (channel) {
+        await channel.send(args.join(' '));
+    } else {
+        originalLog('[ERROR] 未找到指定的頻道');
+    }
+    // 保留原本的 console.log 行為
+    originalLog(...args);
+};
+
 // 監聽 SIGTERM 訊號（Render 停止服務時會發送此信號）
 let isStoppingBot = false;
 process.on('SIGTERM', async () => {
@@ -187,7 +200,7 @@ async function handleCommand(content, message, keyword, commandHandler) {
         const result = commandHandler(content);
         if (result) {
             await message.reply(result);
-            console.log(`[REPLY]${message.author.id}> ${result}`);
+            console.log(`[REPLY]${message.author.username}> ${result}`);
         }
     }
 }

@@ -31,11 +31,6 @@ client.on('error', (error) => {
     console.error('[ERROR]Discord Client 發生錯誤：', error);
 });
 
-// 設定首頁 Router
-app.get("/", (req, res) => {
-    res.send("サポちゃん大地に立つ!!");
-});
-
 // !stopTheDiscordBot 則返回空響應
 app.use((req, res, next) => {
     if (isStoppingBot) {
@@ -44,6 +39,11 @@ app.use((req, res, next) => {
     }
     console.log(`[INFO]收到請求：${req.method} ${req.originalUrl}`);
     next();
+});
+
+// 設定首頁 Router
+app.get("/", (req, res) => {
+    res.send("サポちゃん大地に立つ!!");
 });
 
 // 初始化 REST 客戶端
@@ -102,11 +102,9 @@ client.once("ready", () => {
 const originalLog = console.log;
 console.log = async (...args) => {
     const channel = await client.channels.fetch(process.env.LOG_CHANNEL_ID);
-    if (channel) {
+    try {
         await channel.send(args.join(' '));
-    } else {
-        originalLog('[ERROR] 未找到指定的頻道');
-    }
+    } catch { }
     // 保留原本的 console.log 行為
     originalLog(...args);
 };
@@ -177,7 +175,7 @@ client.on("messageCreate", async (message) => {
         client.destroy(() => {
             console.log("[INFO]Discord 已離線");
         }); // 停止 Discord Bot
-        
+
         //// server.close 不能用，之後再考慮如何關閉 Router
 
         return; // 不用 process.exit(0) 會被render重啟

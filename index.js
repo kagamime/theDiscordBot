@@ -31,7 +31,7 @@ client.on('error', (error) => {
     console.error('[ERROR]Discord Client 發生錯誤:', error);
 });
 
-// 設定首頁路由
+// 設定首頁 Router
 app.get("/", (req, res) => {
     res.send("サポちゃん大地に立つ!!");
 });
@@ -151,18 +151,17 @@ client.on("messageCreate", async (message) => {
         console.log("[INFO]執行 !stopTheDiscordBot");
         await message.reply("おやすみなさい。");
         console.log("[INFO]theDiscordBot 停止中...");
-        client.destroy(); // 停止 Discord Bot
-/*         server.close(() => {
-            console.log("[INFO]Web Server 已關閉");
-        }); */
+        client.destroy(() => {
+            console.log("[INFO]Discord 已離線");
+        }); // 停止 Discord Bot
+        app._router.stack.forEach(function (middleware) {
+            if (middleware.route) { // 確保它是 Router 層級的中間件
+                app._router.stack.splice(app._router.stack.indexOf(middleware), 1);
+            }
+        });
+        console.log("[INFO]Web Server Router已禁用");
 
-        // 延遲 5 秒後退出
-        setTimeout(() => {
-            console.log("[INFO] 正常退出");
-            process.exit(0); // 正常退出，避免 Render 監控重啟
-        }, 5000); // 延遲 5 秒
-
-        //return; // 不用 process.exit(0) 會被render重啟
+        return; // 不用 process.exit(0) 會被render重啟
     }
 
     // 處理符合關鍵字的命令

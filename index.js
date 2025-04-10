@@ -36,6 +36,15 @@ app.get("/", (req, res) => {
     res.send("サポちゃん大地に立つ!!");
 });
 
+// !stopTheDiscordBot 則返回空響應
+app.use((req, res, next) => {
+    if (isStoppingBot) {
+        console.log("[INFO]已停止服務，拒絕請求");
+        return res.status(204).end(); // 直接返回空響應，不處理請求
+    }
+    next();
+});
+
 // 初始化 REST 客戶端
 const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN);
 
@@ -154,12 +163,8 @@ client.on("messageCreate", async (message) => {
         client.destroy(() => {
             console.log("[INFO]Discord 已離線");
         }); // 停止 Discord Bot
-        app._router.stack.forEach(function (middleware) {
-            if (middleware.route) { // 確保它是 Router 層級的中間件
-                app._router.stack.splice(app._router.stack.indexOf(middleware), 1);
-            }
-        });
-        console.log("[INFO]Web Server Router已禁用");
+        
+        //// server.close 不能用，之後再考慮如何關閉 Router
 
         return; // 不用 process.exit(0) 會被render重啟
     }

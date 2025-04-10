@@ -18,14 +18,22 @@ const client = new Client({
 const app = express();
 const port = process.env.PORT || 3000;
 
-// 設定首頁路由
-app.get("/", (req, res) => {
-    res.send("サポちゃん大地に立つ!!");
-});
-
 // 啟動 Web 伺服器
 app.listen(port, () => {
     console.log(`[INFO]Web Server正在埠 ${port} 運行`);
+});
+
+// 錯誤事件處理
+app.on('error', (error) => {
+    console.error('[ERROR] Express 伺服器錯誤:', error);
+});
+client.on('error', (error) => {
+    console.error('[ERROR] Discord Client 發生錯誤:', error);
+});
+
+// 設定首頁路由
+app.get("/", (req, res) => {
+    res.send("サポちゃん大地に立つ!!");
 });
 
 // 初始化 REST 客戶端

@@ -20,15 +20,15 @@ const port = process.env.PORT || 3000;
 
 // 啟動 Web 伺服器
 const server = app.listen(port, () => {
-    console.log(`[INFO] Web Server 正在埠 ${port} 運行`);
+    console.log(`[INFO]Web Server 正在埠 ${port} 運行`);
 });
 
 // 錯誤事件處理
 app.on('error', (error) => {
-    console.error('[ERROR] Express 伺服器錯誤:', error);
+    console.error('[ERROR]Express 伺服器錯誤:', error);
 });
 client.on('error', (error) => {
-    console.error('[ERROR] Discord Client 發生錯誤:', error);
+    console.error('[ERROR]Discord Client 發生錯誤:', error);
 });
 
 // 設定首頁路由
@@ -148,20 +148,20 @@ client.on("messageCreate", async (message) => {
     // 捕獲中止命令 !stopTheDiscordBot
     if (content.includes("!stopTheDiscordBot") && message.member.roles.cache.has(process.env.ADMIN_ROLE_ID)) {
         isStoppingBot = 'true';
-        console.log("[INFO]接收 !stopTheDiscordBot");
+        console.log("[INFO]執行 !stopTheDiscordBot");
         await message.reply("おやすみなさい。");
         console.log("[INFO]theDiscordBot 停止中...");
         client.destroy(); // 停止 Discord Bot
-        server.close(() => {
+/*         server.close(() => {
             console.log("[INFO]Web Server 已關閉");
-        });
+        }); */
 
         // 延遲 5 秒後退出
         setTimeout(() => {
             console.log("[INFO] 正常退出");
             process.exit(0); // 正常退出，避免 Render 監控重啟
         }, 5000); // 延遲 5 秒
-        
+
         //return; // 不用 process.exit(0) 會被render重啟
     }
 

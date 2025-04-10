@@ -1,6 +1,7 @@
 import { Client, GatewayIntentBits, REST, Routes } from "discord.js";
 import { slashHelp, rollDice } from "./misc.js";
 import { theTimestamp } from "./timestamp.js";
+import { theAsk } from "./askHandler.js";
 import express from "express";
 import dotenv from "dotenv";
 dotenv.config();
@@ -54,7 +55,7 @@ const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN);
 // 註冊 Slash Command
 (async () => {
     try {
-        console.log("[INFO]刪除舊Slash Commands...");
+        console.log("[INFO]檢查現有 Slash Commands...");
 
         // 拉取目前伺服器中的所有命令
         const existingCommands = await rest.get(
@@ -64,32 +65,57 @@ const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN);
             ),
         );
 
-        // 刪除所有舊的命令
-        for (const command of existingCommands) {
+        // 比對現有命令與新命令，若有差異才進行刪除與註冊
+        const commandsToDelete = [];
+        const commandsToRegister = [];
+
+        for (const command of theCommands) {
+            // 檢查命令是否已存在
+            const existingCommand = existingCommands.find(
+                (existing) => existing.name === command.name
+            );
+
+            if (!existingCommand) {
+                // 若命令不存在，準備註冊
+                commandsToRegister.push(command);
+            } else {
+                // 若命令存在，檢查是否有變動，若有變動則標記刪除並註冊
+                const isCommandUpdated = existingCommand.description !== command.description;
+                if (isCommandUpdated) {
+                    commandsToDelete.push(existingCommand.id);
+                    commandsToRegister.push(command);
+                }
+            }
+        }
+
+        // 刪除舊命令
+        for (const commandId of commandsToDelete) {
             await rest.delete(
                 Routes.applicationGuildCommand(
                     process.env.CLIENT_ID,
                     process.env.GUILD_ID,
-                    command.id,
+                    commandId,
                 ),
             );
-            console.log("[INFO]刪除命令：" + command.name);
+            console.log("[INFO]刪除舊命令：" + commandId);
         }
 
-        console.log("[INFO]重新註冊Slash Commands...");
-
         // 註冊新的命令
-        await rest.put(
-            Routes.applicationGuildCommands(
-                process.env.CLIENT_ID,
-                process.env.GUILD_ID,
-            ),
-            {
-                body: theCommands, // 命令列表，更新 description 內容
-            },
-        );
-
-        console.log("[INFO]Slash Commands 註冊成功!");
+        if (commandsToRegister.length > 0) {
+            console.log("[INFO]註冊新命令...");
+            await rest.put(
+                Routes.applicationGuildCommands(
+                    process.env.CLIENT_ID,
+                    process.env.GUILD_ID,
+                ),
+                {
+                    body: commandsToRegister,
+                },
+            );
+            console.log("[INFO]Slash Commands 重新註冊成功");
+        } else {
+            console.log("[INFO]Slash Commands 已註冊");
+        }
     } catch (error) {
         console.error(error);
     }
@@ -144,6 +170,19 @@ const theCommands = [
         name: "help",
         description: "サポちゃん的支援說明！！",
     },
+    {
+        name: "ask",
+        description: "提問！！ サポちゃん會想辦法回答！！",
+        type: 1,  // 類型為 1，代表是常規命令
+        options: [
+            {
+                name: "提問",
+                description: "要提問的內容",
+                type: 3,  // 文字類型
+                required: true,
+            },
+        ],
+    },
 ];
 
 // 監聽 Slash Command
@@ -153,9 +192,39 @@ client.on("interactionCreate", async (interaction) => {
 
     if (!interaction.isCommand()) return;
 
+    // /help
     if (interaction.commandName === "help") {
         console.log(`[REPLY]${interaction.user.tag}> 觸發了 /help`);
         await slashHelp(interaction);
+    }
+
+    // /ask
+    if (interaction.commandName === "ask") {
+        // 限定使用頻道
+        const allowedChannels = [process.env.ASK_CHANNEL_ID, process.env.NOTEPAD_CHANNEL_ID];
+        if (!allowedChannels.includes(interaction.channelId)) {
+            return interaction.reply({
+                content: `抱歉，提問請在 <#${process.env.ASK_CHANNEL_ID}> 進行。`,
+                flags: 64,
+            });
+        }
+
+        // 確保 query 參數不為空
+        const query = interaction.options.getString("提問");
+        if (!query) {
+            return interaction.reply({
+                content: "サポちゃん不會讀心！！ 請提問！！",
+                flags: 64,  // 僅顯示給該用戶
+            });
+        }
+        console.log(`[REPLY]${interaction.user.tag}> /ask ${query}`);
+
+        // 執行 LLM 查詢邏輯
+        const result = await theAsk(query);
+        await interaction.reply({
+            content: result || "抱歉，我無法處理你的問題。",
+            flags: 0, // 預設讓所有用戶都能看到回應
+        });
     }
 });
 

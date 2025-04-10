@@ -148,13 +148,21 @@ client.on("messageCreate", async (message) => {
     // 捕獲中止命令 !stopTheDiscordBot
     if (content.includes("!stopTheDiscordBot") && message.member.roles.cache.has(process.env.ADMIN_ROLE_ID)) {
         isStoppingBot = 'true';
+        console.log("[INFO]接收 !stopTheDiscordBot");
         await message.reply("おやすみなさい。");
         console.log("[INFO]theDiscordBot 停止中...");
         client.destroy(); // 停止 Discord Bot
         server.close(() => {
             console.log("[INFO]Web Server 已關閉");
         });
-        return; // 不用 process.exit(0) 會被render重啟
+
+        // 延遲 5 秒後退出
+        setTimeout(() => {
+            console.log("[INFO] 正常退出");
+            process.exit(0); // 正常退出，避免 Render 監控重啟
+        }, 5000); // 延遲 5 秒
+        
+        //return; // 不用 process.exit(0) 會被render重啟
     }
 
     // 處理符合關鍵字的命令

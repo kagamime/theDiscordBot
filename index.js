@@ -151,7 +151,7 @@ client.on("messageCreate", async (message) => {
         await message.reply("おやすみなさい。");
         console.log("[INFO]theDiscordBot 停止中...");
         client.destroy(); // 停止 Discord Bot
-        app.close(() => {
+        server.close(() => {
             console.log("[INFO]Web Server 已關閉");
         });
         return; // 不用 process.exit(0) 會被render重啟

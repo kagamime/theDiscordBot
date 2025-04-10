@@ -19,8 +19,8 @@ const app = express();
 const port = process.env.PORT || 3000;
 
 // 啟動 Web 伺服器
-app.listen(port, () => {
-    console.log(`[INFO]Web Server正在埠 ${port} 運行`);
+const server = app.listen(port, () => {
+    console.log(`[INFO] Web Server 正在埠 ${port} 運行`);
 });
 
 // 錯誤事件處理

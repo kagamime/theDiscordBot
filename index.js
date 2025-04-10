@@ -25,10 +25,10 @@ const server = app.listen(port, () => {
 
 // 錯誤事件處理
 app.on('error', (error) => {
-    console.error('[ERROR]Express 伺服器錯誤:', error);
+    console.error('[ERROR]Express 伺服器錯誤：', error);
 });
 client.on('error', (error) => {
-    console.error('[ERROR]Discord Client 發生錯誤:', error);
+    console.error('[ERROR]Discord Client 發生錯誤：', error);
 });
 
 // 設定首頁 Router
@@ -42,6 +42,7 @@ app.use((req, res, next) => {
         console.log("[INFO]已停止服務，拒絕請求");
         return res.status(204).end(); // 直接返回空響應，不處理請求
     }
+    console.log(`[INFO]收到請求：${req.method} ${req.originalUrl}`);
     next();
 });
 
@@ -186,7 +187,7 @@ async function handleCommand(content, message, keyword, commandHandler) {
         const result = commandHandler(content);
         if (result) {
             await message.reply(result);
-            console.log(`[${keyword}]${result}`);
+            console.log(`[REPLY]${message.author.id}> ${result}`);
         }
     }
 }

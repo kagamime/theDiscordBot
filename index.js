@@ -149,7 +149,7 @@ client.on("messageCreate", async (message) => {
         process.env.IS_STOPPING_BOT = 'true'; // 設置環境變數標誌
         await message.reply("おやすみなさい。");
         console.log("[INFO]theDiscordBot 停止中...");
-        await client.destroy(); // 停止 Discord Bot
+        client.destroy(); // 停止 Discord Bot
         app.close(() => {
             console.log("[INFO]Web Server 已關閉");
         });

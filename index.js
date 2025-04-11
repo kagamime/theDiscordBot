@@ -1,7 +1,7 @@
 import { Client, GatewayIntentBits, REST, Routes } from "discord.js";
 import { slashHelp, rollDice } from "./misc.js";
 import { theTimestamp } from "./timestamp.js";
-import { theAsk } from "./askHandler.js";
+import { slashAsk } from "./askHandler.js";
 import express from "express";
 import dotenv from "dotenv";
 dotenv.config();
@@ -217,25 +217,9 @@ client.on("interactionCreate", async (interaction) => {
                 flags: 64,  // 僅顯示給該用戶
             });
         }
+
         console.log(`[REPLY]${interaction.user.tag}> /ask ${query}`);
-
-        // 執行 LLM 查詢邏輯
-        try {
-            await interaction.deferReply();
-            const reply = await theAsk(query);
-            await interaction.editReply(reply);
-        } catch (error) {
-            console.error('[ERROR]Discord Client 發生錯誤：', error);
-
-            if (interaction.deferred || interaction.replied) {
-                await interaction.editReply('❌ 發生錯誤，請稍後再試');
-            } else {
-                await interaction.reply({
-                    content: '❌ 發生錯誤，請稍後再試',
-                    flags: 64
-                });
-            }
-        }
+        await slashAsk(interaction, query);
     }
 });
 

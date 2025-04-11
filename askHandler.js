@@ -1,11 +1,34 @@
 import fetch from 'node-fetch';  // 用於發送 HTTP 請求
 
 // 主要處理 ASK 命令
-export const theAsk = async (content) => {
-    //// 支援 Wikipedia 部份之後處理
+export const slashAsk = async (interaction, content) => {
+    //// 支援 Wikipedia 或其他LLM部份之後處理
 
-    const aiResult = await askOpenRouter(content);
-    return aiResult || "罷工了!!";
+    // 執行 LLM 查詢邏輯
+    try {
+        // 告知 Discord 延遲回應
+        await interaction.deferReply();
+
+        const { content: aiReply, model: modelName } = await askOpenRouter(content);
+        const formattedReply = [
+            `> ${content} - <@${interaction.user.id}>\n`,
+            aiReply,
+            `\`by ${modelName}\``
+        ].join('\n');
+
+        await interaction.editReply(formattedReply);
+    } catch (error) {
+        console.error('[ERROR]Discord Client 發生錯誤：', error);
+
+        if (interaction.deferred || interaction.replied) {
+            await interaction.editReply('❌ 發生錯誤，請稍後再試');
+        } else {
+            await interaction.reply({
+                content: '❌ 發生錯誤，請稍後再試',
+                flags: 64,
+            });
+        }
+    }
 };
 
 // 使用 OpenRouter AI 查詢
@@ -17,7 +40,7 @@ async function askOpenRouter(prompt) {
         headers: {
             'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
             'Content-Type': 'application/json',
-            'HTTP-Referer': 'https://yourdomain.com/', // 可用任意網站
+            'HTTP-Referer': 'https://yourdomain.com/',
             'X-Title': 'DiscordBot'
         },
         body: JSON.stringify({
@@ -37,13 +60,18 @@ async function askOpenRouter(prompt) {
 
     if (!response.ok) {
         console.error(`OpenRouter Error: ${response.statusText}`);
-        return '❌ 查詢時發生錯誤，請稍後再試！';
+        return {
+            content: '❌ 查詢時發生錯誤，請稍後再試！',
+            model
+        };
     }
 
     const data = await response.json();
-    const content = data.choices?.[0]?.message?.content;
-
-    return (content ? `${content.trim()}\n\n\`by ${model}\`` : '⚠️ 無回應內容');
+    return {
+        content: data.choices?.[0]?.message?.content || '⚠️ 無回應內容',
+        model
+    };
 }
+
 
 

@@ -59,12 +59,18 @@ async function askOpenRouter(prompt) {
     });
 
     if (!response.ok) {
-        console.error(`OpenRouter Error: ${response.statusText}`);
-        return {
-            content: '❌ 查詢時發生錯誤，請稍後再試！',
-            model
-        };
+        const errorBody = await response.json().catch(() => ({}));
+        const errMsg = errorBody.error?.message || response.statusText;
+    
+        console.error(`OpenRouter Error: ${errMsg}`);
+    
+        if (response.status === 429 || errMsg.includes("quota")) {
+            return '⚠️ 已超出每日使用配額。';
+        }
+    
+        return '❌ 查詢時發生錯誤，請稍後再試！';
     }
+    
 
     const data = await response.json();
     return {

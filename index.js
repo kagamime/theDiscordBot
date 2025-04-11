@@ -220,11 +220,22 @@ client.on("interactionCreate", async (interaction) => {
         console.log(`[REPLY]${interaction.user.tag}> /ask ${query}`);
 
         // 執行 LLM 查詢邏輯
-        const result = await theAsk(query);
-        await interaction.reply({
-            content: result || "抱歉，我無法處理你的問題。",
-            flags: 0, // 預設讓所有用戶都能看到回應
-        });
+        try {
+            await interaction.deferReply();
+            const reply = await theAsk(query);
+            await interaction.editReply(reply);
+        } catch (error) {
+            console.error('[ERROR]Discord Client 發生錯誤：', error);
+
+            if (interaction.deferred || interaction.replied) {
+                await interaction.editReply('❌ 發生錯誤，請稍後再試');
+            } else {
+                await interaction.reply({
+                    content: '❌ 發生錯誤，請稍後再試',
+                    flags: 64
+                });
+            }
+        }
     }
 });
 

@@ -129,10 +129,23 @@ client.once("ready", () => {
 // 重寫 console.log，使其同時發送到 Discord
 const originalLog = console.log;
 console.log = async (...args) => {
-    const channel = await client.channels.fetch(process.env.LOG_CHANNEL_ID);
+    const now = new Date().toLocaleTimeString('zh-TW', {
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+        timeZone: 'Asia/Taipei',
+    });
+
+    const prefix = `\`[${now.replace(':', '')}]\``;
+    const message = [prefix, ...args].join('');
+
     try {
-        await channel.send(args.join(' '));
-    } catch { }
+        const channel = await client.channels.fetch(process.env.LOG_CHANNEL_ID);
+        await channel.send(message);
+    } catch (err) {
+        originalLog('[LOG ERROR]', err);
+    }
+    
     // 保留原本的 console.log 行為
     originalLog(...args);
 };

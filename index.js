@@ -56,8 +56,31 @@ const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN);
 
 // 啟動 Discord Bot
 client.once("ready", async () => {
-    console.log(`[INFO]✅ 已登入為 ${client.user.tag}`);
     try {
+        // 重寫 console.log，使其同時發送到 Discord
+        const originalLog = console.log;
+        console.log = async (...args) => {
+            const now = new Date().toLocaleTimeString('zh-TW', {
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: false,
+                timeZone: 'Asia/Taipei',
+            });
+
+            const prefix = `\`[${now.replace(':', '')}]\``;
+            const message = [prefix, ...args].join('');
+
+            try {
+                const channel = await client.channels.fetch(process.env.LOG_CHANNEL_ID);
+                await channel.send(message);
+            } catch (err) {
+                originalLog('[ERROR_SEND]', err);
+            }
+
+            // 保留原本的 console.log 行為
+            originalLog(...args);
+        };
+        
         // Slash Command 註冊開關
         if (process.env.REGISTER_COMMANDS === "true") {
             console.log("[INFO]刪除舊命令並註冊新命令...");
@@ -101,29 +124,7 @@ client.once("ready", async () => {
         console.error("[ERROR]重註冊 Slash Command 發生例外：", error);
     }
 
-    // 重寫 console.log，使其同時發送到 Discord
-    const originalLog = console.log;
-    console.log = async (...args) => {
-        const now = new Date().toLocaleTimeString('zh-TW', {
-            hour: '2-digit',
-            minute: '2-digit',
-            hour12: false,
-            timeZone: 'Asia/Taipei',
-        });
-
-        const prefix = `\`[${now.replace(':', '')}]\``;
-        const message = [prefix, ...args].join('');
-
-        try {
-            const channel = await client.channels.fetch(process.env.LOG_CHANNEL_ID);
-            await channel.send(message);
-        } catch (err) {
-            originalLog('[ERROR_SEND]', err);
-        }
-
-        // 保留原本的 console.log 行為
-        originalLog(...args);
-    };
+    console.log(`[INFO]✅ 已登入為 ${client.user.tag}`);
 });
 
 

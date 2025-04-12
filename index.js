@@ -55,76 +55,41 @@ app.get("/", (req, res) => {
 const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN);
 
 
-// 註冊 Slash Command
-(async () => {
-    try {
-        console.log("[INFO]檢查現有 Slash Commands...");
-
-        // 拉取目前伺服器中的所有命令
-        const existingCommands = await rest.get(
-            Routes.applicationGuildCommands(
-                process.env.CLIENT_ID,
-                process.env.GUILD_ID,
-            ),
-        );
-
-        // 比對現有命令與新命令，若有差異才進行刪除與註冊
-        const commandsToDelete = [];
-        const commandsToRegister = [];
-
-        for (const command of theCommands) {
-            // 檢查命令是否已存在
-            const existingCommand = existingCommands.find(
-                (existing) => existing.name === command.name
-            );
-
-            if (!existingCommand) {
-                // 若命令不存在，準備註冊
-                commandsToRegister.push(command);
-            } else {
-                // 若命令存在，檢查是否有變動，若有變動則標記刪除並註冊
-                const isCommandUpdated =
-                    existingCommand.description !== command.description ||
-                    JSON.stringify(existingCommand.options) !== JSON.stringify(command.options);
-                if (isCommandUpdated) {
-                    commandsToDelete.push(existingCommand.id);
-                    commandsToRegister.push(command);
-                }
+// 重註冊 Slash Command
+if (process.env.REGISTER_COMMANDS === "true") {
+    (async () => {
+        try {
+            // 刪除舊命令
+            for (const commandId of commandsToDelete) {
+                await rest.delete(
+                    Routes.applicationGuildCommand(
+                        process.env.CLIENT_ID,
+                        process.env.GUILD_ID,
+                        commandId,
+                    ),
+                );
+                console.log("[INFO]刪除舊命令：" + commandId);
             }
-        }
 
-        // 刪除舊命令
-        for (const commandId of commandsToDelete) {
-            await rest.delete(
-                Routes.applicationGuildCommand(
-                    process.env.CLIENT_ID,
-                    process.env.GUILD_ID,
-                    commandId,
-                ),
-            );
-            console.log("[INFO]刪除舊命令：" + commandId);
+            // 註冊新的命令
+            if (commandsToRegister.length > 0) {
+                console.log("[INFO]註冊新命令...");
+                await rest.put(
+                    Routes.applicationGuildCommands(
+                        process.env.CLIENT_ID,
+                        process.env.GUILD_ID,
+                    ),
+                    {
+                        body: commandsToRegister,
+                    },
+                );
+                console.log("[INFO]Slash Commands 重新註冊成功");
+            }
+        } catch (error) {
+            console.error(error);
         }
-
-        // 註冊新的命令
-        if (commandsToRegister.length > 0) {
-            console.log("[INFO]註冊新命令...");
-            await rest.put(
-                Routes.applicationGuildCommands(
-                    process.env.CLIENT_ID,
-                    process.env.GUILD_ID,
-                ),
-                {
-                    body: commandsToRegister,
-                },
-            );
-            console.log("[INFO]Slash Commands 重新註冊成功");
-        } else {
-            console.log("[INFO]Slash Commands 已註冊");
-        }
-    } catch (error) {
-        console.error(error);
-    }
-})();
+    })();
+}
 
 // 啟動 Discord Bot
 client.once("ready", () => {

@@ -54,71 +54,79 @@ app.get("/", (req, res) => {
 // 初始化 REST 客戶端
 const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN);
 
+// 啟動 Discord Bot
+client.once("ready", async () => {
+    console.log(`[INFO]✅ 已登入為 ${client.user.tag}`);
+    try {
+        // Slash Command 註冊開關
+        if (process.env.REGISTER_COMMANDS === "true") {
+            console.log("[INFO]刪除舊命令並註冊新命令...");
 
-// 重註冊 Slash Command
-if (process.env.REGISTER_COMMANDS === "true") {
-    (async () => {
-        try {
-            // 刪除舊命令
-            for (const commandId of commandsToDelete) {
+            // 拉取目前伺服器中的所有命令
+            const existingCommands = await rest.get(
+                Routes.applicationGuildCommands(
+                    process.env.CLIENT_ID,
+                    process.env.GUILD_ID,
+                ),
+            );
+
+            // 刪除所有舊命令
+            for (const command of existingCommands) {
                 await rest.delete(
                     Routes.applicationGuildCommand(
                         process.env.CLIENT_ID,
                         process.env.GUILD_ID,
-                        commandId,
+                        command.id,
                     ),
                 );
-                console.log("[INFO]刪除舊命令：" + commandId);
+                console.log("[INFO]刪除舊命令：" + command.id);
             }
 
             // 註冊新的命令
-            if (commandsToRegister.length > 0) {
-                console.log("[INFO]註冊新命令...");
-                await rest.put(
-                    Routes.applicationGuildCommands(
-                        process.env.CLIENT_ID,
-                        process.env.GUILD_ID,
-                    ),
-                    {
-                        body: commandsToRegister,
-                    },
-                );
-                console.log("[INFO]Slash Commands 重新註冊成功");
-            }
-        } catch (error) {
-            console.error(error);
+            console.log("[INFO]註冊新命令...");
+            await rest.put(
+                Routes.applicationGuildCommands(
+                    process.env.CLIENT_ID,
+                    process.env.GUILD_ID,
+                ),
+                {
+                    body: theCommands,
+                },
+            );
+            console.log("[INFO]Slash Commands 重新註冊成功");
+        } else {
+            console.log("[INFO]Slash Commands 已註冊");
         }
-    })();
-}
-
-// 啟動 Discord Bot
-client.once("ready", () => {
-    console.log(`[INFO]✅ 已登入為 ${client.user.tag}`);
-});
-
-// 重寫 console.log，使其同時發送到 Discord
-const originalLog = console.log;
-console.log = async (...args) => {
-    const now = new Date().toLocaleTimeString('zh-TW', {
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: false,
-        timeZone: 'Asia/Taipei',
-    });
-
-    const prefix = `\`[${now.replace(':', '')}]\``;
-    const message = [prefix, ...args].join('');
-
-    try {
-        const channel = await client.channels.fetch(process.env.LOG_CHANNEL_ID);
-        await channel.send(message);
-    } catch (err) {
-        originalLog('[LOG ERROR]', err);
+    } catch (error) {
+        console.error("[ERROR]重註冊 Slash Command 發生例外：", error);
     }
 
-    // 保留原本的 console.log 行為
-    originalLog(...args);
-};
+    // 重寫 console.log，使其同時發送到 Discord
+    const originalLog = console.log;
+    console.log = async (...args) => {
+        const now = new Date().toLocaleTimeString('zh-TW', {
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false,
+            timeZone: 'Asia/Taipei',
+        });
+
+        const prefix = `\`[${now.replace(':', '')}]\``;
+        const message = [prefix, ...args].join('');
+
+        try {
+            const channel = await client.channels.fetch(process.env.LOG_CHANNEL_ID);
+            await channel.send(message);
+        } catch (err) {
+            originalLog('[ERROR_SEND]', err);
+        }
+
+        // 保留原本的 console.log 行為
+        originalLog(...args);
+    };
+});
+
+
 
 // 監聽 SIGTERM 訊號（Render 停止服務時會發送此信號）
 let isStoppingBot = false;
@@ -211,7 +219,7 @@ client.on("interactionCreate", async (interaction) => {
         // 取得選擇的模型
         const selectedModel = interaction.options.getString("模型") || 'gemini';
 
-        console.log(`[REPLY]${interaction.user.tag}> /ask ${query} - \`${selectedModel}\``);
+        //console.log(`[REPLY]${interaction.user.tag}> /ask ${query} - \`${selectedModel}\``);
         await slashAsk(interaction, query, selectedModel);
     }
 });

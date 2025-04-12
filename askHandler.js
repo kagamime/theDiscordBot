@@ -1,19 +1,24 @@
 import fetch from 'node-fetch';  // 用於發送 HTTP 請求
 
 // 模型清單，鍵名作為 enum 選項值
-export const MODEL_OPTIONS = {
+const MODEL_OPTIONS = {
     gemini: {
         name: 'gemini-2.0-flash',
         source: 'gemini',
         handler: askGemini,
     },
-    openchat: {
+    openchat_3_5_turbo: {
+        name: 'openchat/gpt-3.5-turbo',
+        source: 'openrouter',
+        handler: askOpenRouter,
+    },
+    openchat_3_5: {
         name: 'openchat/openchat-3.5-0106',
         source: 'openrouter',
         handler: askOpenRouter,
     },
-    opengpt: {
-        name: 'openchat/gpt-3.5-turbo',
+    opengptmini: {
+        name: 'openchat/gpt-4o-mini',
         source: 'openrouter',
         handler: askOpenRouter,
     }
@@ -27,47 +32,56 @@ export const MODEL_CHOICES = Object.entries(MODEL_OPTIONS).map(([key, value]) =>
 
 // 主要處理 ASK 命令
 export const slashAsk = async (interaction, content, selectedModel) => {
-    //// 支援 Wikipedia 或其他LLM部份之後處理
+    await interaction.deferReply(); // 告知 Discord 延遲回應
 
-    // 告知 Discord 延遲回應
-    await interaction.deferReply();
+    //// 回答超過2000字會出錯待修正
 
-    let modelKeys = Object.keys(MODEL_OPTIONS);
-    let fallbackNotice = '';
-    let modelInfo = MODEL_OPTIONS[selectedModel] || MODEL_OPTIONS['openchat'];
-    let aiReply = '', modelName = '';
+    const modelKeys = Object.keys(MODEL_OPTIONS);
+    const startIndex = modelKeys.indexOf(selectedModel);
 
-    for (let i = modelKeys.indexOf(selectedModel); i < modelKeys.length; i++) {
-        const key = modelKeys[i];
-        const model = MODEL_OPTIONS[key];
+    let aiReply = '', modelName = '', fallbackNotice = '';
+    const userTag = interaction.user.tag;
+
+    // 確保從選定模型開始循環
+    let triedModels = 0; // 記錄嘗試過的模型數量
+    let initialModel = selectedModel; // 記錄最初的選定模型
+
+    while (triedModels < modelKeys.length) {
+        const key = modelKeys[(startIndex + triedModels) % modelKeys.length];
+        
         try {
-            const result = await model.handler(content);
-            if (result?.content && !result.content.startsWith('❌')) {
+            const result = await MODEL_OPTIONS[key].handler(content);
+            
+            if (result?.content) {
                 aiReply = result.content;
                 modelName = result.model;
 
-                // 加入模型切換紀錄（如有）
-                if (key !== selectedModel) {
-                    fallbackNotice = `\`${MODEL_OPTIONS[selectedModel].name}已超支\``;
-                    console.log(`[REPLY]${interaction.user.tag}> /ask ${content} - ${selectedModel} -> ${key}`);
-                } else {
-                    console.log(`[REPLY]${interaction.user.tag}> /ask ${content} - \`${key}\``);
-                }
-                break;
+                // 記錄模型切換
+                const switchLog = key !== initialModel ? ` -> \`${MODEL_OPTIONS[key].name}\`` : '';
+                console.log(`[REPLY]${userTag}> \`/ask\` ${content} - \`${MODEL_OPTIONS[initialModel].name}\`${switchLog}`);
+                break;  // 找到有效回應後跳出循環
             } else {
-                if (key === selectedModel) fallbackNotice = `\`${MODEL_OPTIONS[selectedModel].name}沒回應\``;
+                console.log(`[INFO]\`${MODEL_OPTIONS[key].name}\`回應無效，嘗試下一個模型`);
             }
         } catch (err) {
-            console.error(`[ERROR] 執行 ${key} 模型時發生例外：`, err);
-            if (key === selectedModel) fallbackNotice = `\`${MODEL_OPTIONS[selectedModel].name}沒回應\``;
+            console.error(`[ERROR]執行 ${MODEL_OPTIONS[key].name} 時發生錯誤:`, err);
         }
+
+        fallbackNotice = `\`${MODEL_OPTIONS[initialModel].name}沒回應\``;
+        triedModels++;
     }
 
+    // 如果沒有任何模型回應
+    if (!aiReply) {
+        console.log(`[REPLY]${userTag}> \`/ask\` ${content} - \`${MODEL_OPTIONS[initialModel].name}\` -> \`（模型皆無回應）\``);
+    }
+
+    // 記錄並格式化回覆
     const formattedReply = [
-        `> ${content} - <@${interaction.user.id}>`,
-        fallbackNotice,
-        aiReply,
-        `\`by ${modelName}\``
+        `> ${content} - <@${interaction.user.id}>`, // 原提問
+        fallbackNotice,  // 沒有回應的模型提示
+        aiReply,         // 模型的回應內容
+        aiReply && `\`by ${modelName}\`` // 模型名稱
     ].filter(Boolean).join('\n');
 
     await interaction.editReply(formattedReply);
@@ -75,7 +89,7 @@ export const slashAsk = async (interaction, content, selectedModel) => {
 
 // 使用 Gemini 模型
 async function askGemini(prompt) {
-    const model = MODEL_OPTIONS.gemini.name;  // e.g. "gemini-2.0-flash"
+    const model = MODEL_OPTIONS.gemini.name;
 
     const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`, {
         method: 'POST',
@@ -86,13 +100,12 @@ async function askGemini(prompt) {
     });
 
     if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        console.error(`Gemini Error: ${response.status} ${response.statusText}`, errorData);
-        return { content: '❌ 查詢時發生錯誤，請稍後再試！', model };
+        console.error(`Gemini Error: ${response.status} ${response.statusText}`);
+        return { content: '', model };  // 空回應
     }
 
     const data = await response.json();
-    const content = data?.candidates?.[0]?.content?.parts?.[0]?.text || '⚠️ 無回應內容';
+    const content = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
 
     return {
         content,
@@ -102,8 +115,16 @@ async function askGemini(prompt) {
 
 // 使用 OpenRouter 模型
 async function askOpenRouter(prompt, modelOverride) {
-    const modelKey = modelOverride || 'openchat';
-    const model = MODEL_OPTIONS[modelKey].name;
+    const modelKey = modelOverride || 'openchat_3_5_turbo';  // 如果沒有提供 modelOverride，則使用預設模型
+    const model = MODEL_OPTIONS[modelKey];
+
+    // 檢查模型是否存在
+    if (!model) {
+        console.error(`Model key '${modelKey}' is invalid or not found in MODEL_OPTIONS.`);
+        return { content: '', model: 'error' };  // 空回應
+    }
+
+    const modelName = model.name;  // 正確地提取模型名稱
 
     const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
@@ -114,7 +135,7 @@ async function askOpenRouter(prompt, modelOverride) {
             'X-Title': 'DiscordBot'
         },
         body: JSON.stringify({
-            model,
+            model: modelName,
             messages: [
                 { role: 'system', content: '你是一個友善又簡潔的 Discord 機器人助手，用繁體中文回答問題。' },
                 { role: 'user', content: prompt }
@@ -124,12 +145,13 @@ async function askOpenRouter(prompt, modelOverride) {
 
     if (!response.ok) {
         console.error(`OpenRouter Error: ${response.statusText}`);
-        return { content: '❌ 查詢時發生錯誤，請稍後再試！', model };
+        return { content: '', model: modelName };  // 空回應
     }
 
     const data = await response.json();
     return {
-        content: data.choices?.[0]?.message?.content || '⚠️ 無回應內容',
-        model
+        content: data.choices?.[0]?.message?.content || '',
+        model: modelName
     };
 }
+

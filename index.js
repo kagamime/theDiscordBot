@@ -1,12 +1,14 @@
 import { Client, GatewayIntentBits, REST, Routes } from "discord.js";
 import { slashHelp, rollDice } from "./misc.js";
 import { theTimestamp } from "./timestamp.js";
-import { slashAsk } from "./askHandler.js";
+import { slashAsk, MODEL_CHOICES } from "./askHandler.js";
 import express from "express";
 import dotenv from "dotenv";
 dotenv.config();
 
 console.log("___________________________________");
+
+//#region 初始化啟動
 
 // 建立 Discord client 實例
 const client = new Client({
@@ -52,6 +54,7 @@ app.get("/", (req, res) => {
 // 初始化 REST 客戶端
 const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN);
 
+
 // 註冊 Slash Command
 (async () => {
     try {
@@ -80,7 +83,9 @@ const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN);
                 commandsToRegister.push(command);
             } else {
                 // 若命令存在，檢查是否有變動，若有變動則標記刪除並註冊
-                const isCommandUpdated = existingCommand.description !== command.description;
+                const isCommandUpdated =
+                    existingCommand.description !== command.description ||
+                    JSON.stringify(existingCommand.options) !== JSON.stringify(command.options);
                 if (isCommandUpdated) {
                     commandsToDelete.push(existingCommand.id);
                     commandsToRegister.push(command);
@@ -145,7 +150,7 @@ console.log = async (...args) => {
     } catch (err) {
         originalLog('[LOG ERROR]', err);
     }
-    
+
     // 保留原本的 console.log 行為
     originalLog(...args);
 };
@@ -176,6 +181,7 @@ process.on('SIGTERM', async () => {
 
     return;
 });
+//#endregion
 
 // 定義 Slash 命令列表
 const theCommands = [
@@ -193,6 +199,13 @@ const theCommands = [
                 description: "要提問的內容",
                 type: 3,  // 文字類型
                 required: true,
+            },
+            {
+                name: "模型",
+                description: "切換使用模型(選填)",
+                type: 3,
+                required: false,
+                choices: MODEL_CHOICES // 定義在 askHandler.js 內
             },
         ],
     },
@@ -230,9 +243,11 @@ client.on("interactionCreate", async (interaction) => {
                 flags: 64,  // 僅顯示給該用戶
             });
         }
+        // 取得選擇的模型
+        const selectedModel = interaction.options.getString("模型") || 'gemini';
 
-        console.log(`[REPLY]${interaction.user.tag}> /ask ${query}`);
-        await slashAsk(interaction, query);
+        console.log(`[REPLY]${interaction.user.tag}> /ask ${query} - \`${selectedModel}\``);
+        await slashAsk(interaction, query, selectedModel);
     }
 });
 

@@ -1,7 +1,33 @@
 import fetch from 'node-fetch';  // 用於發送 HTTP 請求
 
+// 模型清單，鍵名作為 enum 選項值
+export const MODEL_OPTIONS = {
+    gemini: {
+        name: 'gemini-2.0-flash',
+        source: 'gemini',
+        handler: askGemini,
+    },
+    openchat: {
+        name: 'openchat/openchat-3.5-0106',
+        source: 'openrouter',
+        handler: askOpenRouter,
+    }
+};
+
+// 產生 Discord 的模型選項用於註冊
+export const MODEL_CHOICES = Object.entries(MODEL_OPTIONS).map(([key, value]) => ({
+    name: value.name,
+    value: key
+}));
+
+/* export const MODEL_OPTIONS = [
+    { name: "OpenChat", value: "openchat/openchat-3.5-0106", source: "openrouter" },
+    { name: "Nous Capybara", value: "nousresearch/nous-capybara-7b", source: "openrouter" },
+    { name: "Gemini", value: "google/gemini-pro", source: "gemini" }
+]; */
+
 // 主要處理 ASK 命令
-export const slashAsk = async (interaction, content) => {
+export const slashAsk = async (interaction, content, selectedModel) => {
     //// 支援 Wikipedia 或其他LLM部份之後處理
 
     // 執行 LLM 查詢邏輯
@@ -9,7 +35,9 @@ export const slashAsk = async (interaction, content) => {
         // 告知 Discord 延遲回應
         await interaction.deferReply();
 
-        const { content: aiReply, model: modelName } = await askOpenRouter(content);
+        const modelInfo = MODEL_OPTIONS[selectedModel] || MODEL_OPTIONS['openchat'];
+        const { content: aiReply, model: modelName } = await modelInfo.handler(content);
+
         const formattedReply = [
             `> ${content} - <@${interaction.user.id}>\n`,
             aiReply,
@@ -31,9 +59,36 @@ export const slashAsk = async (interaction, content) => {
     }
 };
 
-// 使用 OpenRouter AI 查詢
+// 使用 Gemini 模型
+async function askGemini(prompt) {
+    const model = MODEL_OPTIONS.gemini.name;  // e.g. "gemini-2.0-flash"
+
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }]
+        })
+    });
+
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        console.error(`Gemini Error: ${response.status} ${response.statusText}`, errorData);
+        return { content: '❌ 查詢時發生錯誤，請稍後再試！', model };
+    }
+
+    const data = await response.json();
+    const content = data?.candidates?.[0]?.content?.parts?.[0]?.text || '⚠️ 無回應內容';
+
+    return {
+        content,
+        model
+    };
+}
+
+// 使用 OpenRouter 模型
 async function askOpenRouter(prompt) {
-    const model = 'openchat/openchat-3.5-0106'; // 免費模型，可更換為其他如 nousresearch/nous-capybara-7b
+    const model = MODEL_OPTIONS.openchat.name;
 
     const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
@@ -46,31 +101,16 @@ async function askOpenRouter(prompt) {
         body: JSON.stringify({
             model,
             messages: [
-                {
-                    role: 'system',
-                    content: '你是一個友善又簡潔的 Discord 機器人助手，用繁體中文回答問題。'
-                },
-                {
-                    role: 'user',
-                    content: prompt
-                }
+                { role: 'system', content: '你是一個友善又簡潔的 Discord 機器人助手，用繁體中文回答問題。' },
+                { role: 'user', content: prompt }
             ]
         })
     });
 
     if (!response.ok) {
-        const errorBody = await response.json().catch(() => ({}));
-        const errMsg = errorBody.error?.message || response.statusText;
-    
-        console.error(`OpenRouter Error: ${errMsg}`);
-    
-        if (response.status === 429 || errMsg.includes("quota")) {
-            return '⚠️ 已超出每日使用配額。';
-        }
-    
-        return '❌ 查詢時發生錯誤，請稍後再試！';
+        console.error(`OpenRouter Error: ${response.statusText}`);
+        return { content: '❌ 查詢時發生錯誤，請稍後再試！', model };
     }
-    
 
     const data = await response.json();
     return {
@@ -78,6 +118,3 @@ async function askOpenRouter(prompt) {
         model
     };
 }
-
-
-

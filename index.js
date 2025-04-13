@@ -36,13 +36,19 @@ client.on('error', (error) => {
     console.error('[ERROR]Discord Client 發生錯誤：', error);
 });
 
-// !stopTheDiscordBot 則返回空響應
 app.use((req, res, next) => {
+    // !stopTheDiscordBot 則返回空響應，不處理請求
     if (isStoppingBot) {
         console.log("[INFO]已停止服務，拒絕請求");
-        return res.status(204).end(); // 直接返回空響應，不處理請求
+        return res.status(204).end();
     }
-    console.log(`[INFO]收到請求：${req.method} ${req.originalUrl}`);
+
+    // 收到 cron-job 定時請求
+    if (req.headers['the-cron-job'] === 'true') {
+        console.log(`[INFO]收到請求：${req.method} cron-job.org`);
+    } else {
+        console.log(`[INFO]收到請求：${req.method} ${req.originalUrl}`);
+    }
     next();
 });
 
@@ -68,7 +74,14 @@ client.once("ready", async () => {
             });
 
             const prefix = `\`[${now.replace(':', '')}]\``;
-            const message = [prefix, ...args].join('');
+            let message = [prefix, ...args].join('');
+
+            // 除 cron-job 定時請求以外，保留原本的 console.log 行為
+            if (args.join('').includes('cron-job.org')) {
+                message = `||${message}||`;
+            } else {
+                originalLog(...args);
+            }
 
             try {
                 const channel = await client.channels.fetch(process.env.LOG_CHANNEL_ID);
@@ -77,10 +90,9 @@ client.once("ready", async () => {
                 originalLog('[ERROR_SEND]', err);
             }
 
-            // 保留原本的 console.log 行為
-            originalLog(...args);
+
         };
-        
+
         // Slash Command 註冊開關
         if (process.env.REGISTER_COMMANDS === "true") {
             console.log("[INFO]刪除舊命令並註冊新命令...");
@@ -240,7 +252,7 @@ client.on("messageCreate", async (message) => {
         isStoppingBot = 'true';
         console.log("[INFO]執行 !stopTheDiscordBot");
         await message.reply("おやすみなさい。");
-        console.log("[INFO]theDiscordBot 停止中...");
+        console.log("[INFO]🔴 theDiscordBot 停止中...");
         client.destroy(() => {
             console.log("[INFO]Discord 已離線");
         }); // 停止 Discord Bot

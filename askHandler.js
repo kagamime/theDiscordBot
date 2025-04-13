@@ -2,7 +2,7 @@ import fetch from 'node-fetch';  // 用於發送 HTTP 請求
 
 // 模型清單，鍵名作為 enum 選項值
 const MODEL_OPTIONS = {
-    gemini: {
+    gemini_2_0_flash: {
         name: 'gemini-2.0-flash',
         source: 'gemini',
         handler: askGemini,
@@ -10,17 +10,17 @@ const MODEL_OPTIONS = {
     openchat_3_5_turbo: {
         name: 'openchat/gpt-3.5-turbo',
         source: 'openrouter',
-        handler: askOpenRouter,
+        handler: askOpenrouter,
     },
     openchat_3_5: {
         name: 'openchat/openchat-3.5-0106',
         source: 'openrouter',
-        handler: askOpenRouter,
+        handler: askOpenrouter,
     },
     opengptmini: {
         name: 'openchat/gpt-4o-mini',
         source: 'openrouter',
-        handler: askOpenRouter,
+        handler: askOpenrouter,
     }
 };
 
@@ -34,9 +34,8 @@ export const MODEL_CHOICES = Object.entries(MODEL_OPTIONS).map(([key, value]) =>
 export const slashAsk = async (interaction, content, selectedModel) => {
     await interaction.deferReply(); // 告知 Discord 延遲回應
 
-    //// 回答超過2000字會出錯待修正
-
     const modelKeys = Object.keys(MODEL_OPTIONS);
+    selectedModel = selectedModel || modelKeys[0];
     const startIndex = modelKeys.indexOf(selectedModel);
 
     let aiReply = '', modelName = '', fallbackNotice = '';
@@ -50,7 +49,7 @@ export const slashAsk = async (interaction, content, selectedModel) => {
         const key = modelKeys[(startIndex + triedModels) % modelKeys.length];
 
         try {
-            const result = await MODEL_OPTIONS[key].handler(content);
+            const result = await MODEL_OPTIONS[key].handler(content, MODEL_OPTIONS[key]);
 
             if (result?.content) {
                 aiReply = result.content;
@@ -79,8 +78,8 @@ export const slashAsk = async (interaction, content, selectedModel) => {
     // 記錄並格式化回覆
     const formattedReply = [
         `> ${content} - <@${interaction.user.id}>`, // 原提問
-        fallbackNotice,  // 沒有回應的模型提示
         aiReply,         // 模型的回應內容
+        fallbackNotice,  // 沒有回應的模型提示
         aiReply && `\`by ${modelName}\`` // 模型名稱
     ].filter(Boolean).join('\n');
 
@@ -94,6 +93,7 @@ export const slashAsk = async (interaction, content, selectedModel) => {
     }
 };
 
+// 分段訊息
 const splitDiscordMessage = (text, userTag, maxLength = 1950) => {
     const lines = text.split('\n');
     const chunks = [];
@@ -119,8 +119,8 @@ const splitDiscordMessage = (text, userTag, maxLength = 1950) => {
 };
 
 // 使用 Gemini 模型
-async function askGemini(prompt) {
-    const model = MODEL_OPTIONS.gemini.name;
+async function askGemini(prompt, modelConfig) {
+    const model = modelConfig.name;
 
     // 檢查 prompt 是否包含中文字符，加入簡潔提示詞
     if (/[\u4e00-\u9fa5]/.test(prompt)) {
@@ -150,17 +150,8 @@ async function askGemini(prompt) {
 }
 
 // 使用 OpenRouter 模型
-async function askOpenRouter(prompt, modelOverride) {
-    const modelKey = modelOverride || 'openchat_3_5_turbo';  // 如果沒有提供 modelOverride，則使用預設模型
-    const model = MODEL_OPTIONS[modelKey];
-
-    // 檢查模型是否存在
-    if (!model) {
-        console.error(`Model key '${modelKey}' is invalid or not found in MODEL_OPTIONS.`);
-        return { content: '', model: 'error' };  // 空回應
-    }
-
-    const modelName = model.name;  // 正確地提取模型名稱
+async function askOpenrouter(prompt, modelConfig) {
+    const modelName = modelConfig.name;
 
     const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
@@ -181,7 +172,7 @@ async function askOpenRouter(prompt, modelOverride) {
 
     if (!response.ok) {
         console.error(`OpenRouter Error: ${response.statusText}`);
-        return { content: '', model: modelName };  // 空回應
+        return { content: '', model: modelName }; // 空回應
     }
 
     const data = await response.json();

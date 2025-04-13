@@ -122,6 +122,11 @@ const splitDiscordMessage = (text, userTag, maxLength = 1950) => {
 async function askGemini(prompt) {
     const model = MODEL_OPTIONS.gemini.name;
 
+    // 檢查 prompt 是否包含中文字符，加入簡潔提示詞
+    if (/[\u4e00-\u9fa5]/.test(prompt)) {
+        prompt = `如果回答中使用中文，請使用繁體中文並避免簡體字。\n${prompt}`;
+    }
+
     const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

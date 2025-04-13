@@ -4,30 +4,30 @@ import fetch from 'node-fetch';  // 用於發送 HTTP 請求
 const MODEL_OPTIONS = {
     gemini_2_0_flash: {
         name: 'gemini-2.0-flash',
-        source: 'gemini',
+        description: "低延遲的模型，適合快速回答。",
+        handler: askGemini,
+    },
+    gemini_2_0_pro_exp: {
+        name: 'gemini-2.0-pro-exp',
+        description: "高品質回應模型，適合深度對話。",
         handler: askGemini,
     },
     openchat_3_5_turbo: {
         name: 'openchat/gpt-3.5-turbo',
-        source: 'openrouter',
+        description: "輕量優化版 ChatGPT，訓練資料截至 2021 年。",
         handler: askOpenrouter,
     },
     openchat_3_5: {
         name: 'openchat/openchat-3.5-0106',
-        source: 'openrouter',
+        description: "標準版 ChatGPT，訓練資料截至 2021 年。",
         handler: askOpenrouter,
     },
-    opengptmini: {
-        name: 'openchat/gpt-4o-mini',
-        source: 'openrouter',
-        handler: askOpenrouter,
-    }
 };
 
 // 產生 Discord 的模型選項用於註冊
 export const MODEL_CHOICES = Object.entries(MODEL_OPTIONS).map(([key, value]) => ({
-    name: value.name,
-    value: key
+    name: `${value.name}：${value.description}`, // 顯示在選單上的文字
+    value: key, // 實際傳到指令處理器的值
 }));
 
 // 主要處理 ASK 命令
@@ -60,13 +60,13 @@ export const slashAsk = async (interaction, content, selectedModel) => {
                 console.log(`[REPLY]${userTag}> \`/ask\` ${content} - \`${MODEL_OPTIONS[initialModel].name}\`${switchLog}`);
                 break;  // 找到有效回應後跳出循環
             } else {
-                console.log(`[INFO]\`${MODEL_OPTIONS[key].name}\`回應無效，嘗試下一個模型`);
+                console.warn(`[WARN]\`${MODEL_OPTIONS[key].name}\`回應無效，嘗試下一個模型`);
             }
         } catch (err) {
             console.error(`[ERROR]執行 ${MODEL_OPTIONS[key].name} 時發生錯誤:`, err);
         }
 
-        fallbackNotice = `\`${MODEL_OPTIONS[initialModel].name}沒回應\``;
+        fallbackNotice = `\`${MODEL_OPTIONS[initialModel].name} 沒回應\``;
         triedModels++;
     }
 
@@ -136,7 +136,7 @@ async function askGemini(prompt, modelConfig) {
     });
 
     if (!response.ok) {
-        console.error(`Gemini Error: ${response.status} ${response.statusText}`);
+        console.error(`[ERROR]Gemini Error: ${response.status} ${response.statusText}`);
         return { content: '', model };  // 空回應
     }
 
@@ -149,7 +149,7 @@ async function askGemini(prompt, modelConfig) {
     };
 }
 
-// 使用 OpenRouter 模型
+// 使用 Openrouter 模型
 async function askOpenrouter(prompt, modelConfig) {
     const modelName = modelConfig.name;
 
@@ -171,7 +171,7 @@ async function askOpenrouter(prompt, modelConfig) {
     });
 
     if (!response.ok) {
-        console.error(`OpenRouter Error: ${response.statusText}`);
+        console.error(`[ERROR]Openrouter Error: ${response.statusText}`);
         return { content: '', model: modelName }; // 空回應
     }
 

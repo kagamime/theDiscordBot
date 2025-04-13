@@ -25,7 +25,7 @@ const port = process.env.PORT || 3000;
 
 // 啟動 Web 伺服器
 const server = app.listen(port, () => {
-    console.log(`[INFO]Web Server 正在埠 ${port} 運行`);
+    console.info(`[INFO]Web Server 正在埠 ${port} 運行`);
 });
 
 // 錯誤事件處理
@@ -36,18 +36,48 @@ client.on('error', (error) => {
     console.error('[ERROR]Discord Client 發生錯誤：', error);
 });
 
+// 重寫 console.log，使其同時發送到 Discord
+const overrideConsole = (type) => {
+    const original = console[type];
+
+    console[type] = async (...args) => {
+        const now = new Date().toLocaleTimeString('zh-TW', {
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false,
+            timeZone: 'Asia/Taipei',
+        });
+
+        const prefix = `\`[${now.replace(':', '')}]\``;
+        let message = [prefix, ...args].join('');
+
+        if (args.join('').includes('cron-job.org')) {
+            message = `||${message}||`;
+        } else {
+            original(...args); // 保留原始行為
+        }
+
+        try {
+            const channel = await client.channels.fetch(process.env.LOG_CHANNEL_ID);
+            await channel.send(message);
+        } catch (err) {
+            original('[ERROR_SEND]', err);
+        }
+    };
+};
+
 app.use((req, res, next) => {
     // !stopTheDiscordBot 則返回空響應，不處理請求
     if (isStoppingBot) {
-        console.log("[INFO]已停止服務，拒絕請求");
+        console.info("[INFO]已停止服務，拒絕請求");
         return res.status(204).end();
     }
 
     // 收到 cron-job 定時請求
     if (req.headers['the-cron-job'] === 'true') {
-        console.log(`[INFO]收到請求：${req.method} cron-job.org`);
+        console.info(`[INFO]收到請求：${req.method} cron-job.org`);
     } else {
-        console.log(`[INFO]收到請求：${req.method} ${req.originalUrl}`);
+        console.info(`[INFO]收到請求：${req.method} ${req.originalUrl}`);
     }
     next();
 });
@@ -63,39 +93,15 @@ const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN);
 // 啟動 Discord Bot
 client.once("ready", async () => {
     try {
-        // 重寫 console.log，使其同時發送到 Discord
-        const originalLog = console.log;
-        console.log = async (...args) => {
-            const now = new Date().toLocaleTimeString('zh-TW', {
-                hour: '2-digit',
-                minute: '2-digit',
-                hour12: false,
-                timeZone: 'Asia/Taipei',
-            });
-
-            const prefix = `\`[${now.replace(':', '')}]\``;
-            let message = [prefix, ...args].join('');
-
-            // 除 cron-job 定時請求以外，保留原本的 console.log 行為
-            if (args.join('').includes('cron-job.org')) {
-                message = `||${message}||`;
-            } else {
-                originalLog(...args);
-            }
-
-            try {
-                const channel = await client.channels.fetch(process.env.LOG_CHANNEL_ID);
-                await channel.send(message);
-            } catch (err) {
-                originalLog('[ERROR_SEND]', err);
-            }
-
-
-        };
+        // 進行 console 方法的統一覆寫
+        overrideConsole('log');
+        overrideConsole('info');
+        overrideConsole('warn');
+        overrideConsole('error');
 
         // Slash Command 註冊開關
         if (process.env.REGISTER_COMMANDS === "true") {
-            console.log("[INFO]刪除舊命令並註冊新命令...");
+            console.info("[INFO]刪除舊命令並註冊新命令...");
 
             // 拉取目前伺服器中的所有命令
             const existingCommands = await rest.get(
@@ -114,11 +120,11 @@ client.once("ready", async () => {
                         command.id,
                     ),
                 );
-                console.log("[INFO]刪除舊命令：" + command.id);
+                console.info("[INFO]刪除舊命令：" + command.id);
             }
 
             // 註冊新的命令
-            console.log("[INFO]註冊新命令...");
+            console.info("[INFO]註冊新命令...");
             await rest.put(
                 Routes.applicationGuildCommands(
                     process.env.CLIENT_ID,
@@ -128,18 +134,16 @@ client.once("ready", async () => {
                     body: theCommands,
                 },
             );
-            console.log("[INFO]Slash Commands 重新註冊成功");
+            console.info("[INFO]Slash Commands 重新註冊成功");
         } else {
-            console.log("[INFO]Slash Commands 已註冊");
+            console.info("[INFO]Slash Commands 已註冊");
         }
     } catch (error) {
         console.error("[ERROR]重註冊 Slash Command 發生例外：", error);
     }
 
-    console.log(`[INFO]✅ 已登入為 ${client.user.tag}`);
+    console.info(`[INFO]✅ 已登入為 ${client.user.tag}`);
 });
-
-
 
 // 監聽 SIGTERM 訊號（Render 停止服務時會發送此信號）
 let isStoppingBot = false;
@@ -147,7 +151,7 @@ process.on('SIGTERM', async () => {
     // !stopTheDiscordBot 則跳過重啟
     if (isStoppingBot) return;
 
-    console.log('[INFO]已收到 SIGTERM 訊號，正在開始重啟程序...');
+    console.info('[INFO]已收到 SIGTERM 訊號，正在開始重啟程序...');
 
     try {
         const response = await fetch(process.env.DEPLOY_HOOK_URL, {
@@ -157,7 +161,7 @@ process.on('SIGTERM', async () => {
         });
 
         if (response.ok) {
-            console.log('[INFO]成功觸發部署');
+            console.info('[INFO]成功觸發部署');
         } else {
             console.error('[ERROR]觸發部署時出錯');
         }
@@ -249,14 +253,12 @@ client.on("messageCreate", async (message) => {
     // 捕獲中止命令 !stopTheDiscordBot
     if (content.includes("!stopTheDiscordBot") && message.member.roles.cache.has(process.env.ADMIN_ROLE_ID)) {
         isStoppingBot = 'true';
-        console.log("[INFO]執行 !stopTheDiscordBot");
+        console.info("[INFO]執行 !stopTheDiscordBot");
         await message.reply("おやすみなさい。");
-        console.log("[INFO]🔴 theDiscordBot 停止中...");
+        console.info("[INFO]🔴 theDiscordBot 停止中...");
         client.destroy(() => {
-            console.log("[INFO]Discord 已離線");
+            console.info("[INFO]Discord 已離線");
         }); // 停止 Discord Bot
-
-        //// server.close 不能用，之後再考慮如何關閉 Router
 
         return; // 不用 process.exit(0) 會被render重啟
     }

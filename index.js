@@ -232,7 +232,6 @@ client.on("interactionCreate", async (interaction) => {
         // 取得選擇的模型
         const selectedModel = interaction.options.getString("模型") || 'gemini';
 
-        //console.log(`[REPLY]${interaction.user.tag}> /ask ${query} - \`${selectedModel}\``);
         await slashAsk(interaction, query, selectedModel);
     }
 });

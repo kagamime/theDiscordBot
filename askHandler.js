@@ -48,10 +48,10 @@ export const slashAsk = async (interaction, content, selectedModel) => {
 
     while (triedModels < modelKeys.length) {
         const key = modelKeys[(startIndex + triedModels) % modelKeys.length];
-        
+
         try {
             const result = await MODEL_OPTIONS[key].handler(content);
-            
+
             if (result?.content) {
                 aiReply = result.content;
                 modelName = result.model;
@@ -84,7 +84,38 @@ export const slashAsk = async (interaction, content, selectedModel) => {
         aiReply && `\`by ${modelName}\`` // 模型名稱
     ].filter(Boolean).join('\n');
 
-    await interaction.editReply(formattedReply);
+    const chunks = splitDiscordMessage(formattedReply, `<@${interaction.user.id}>`);
+    // 發送分段訊息
+    if (chunks.length > 0) {
+        await interaction.editReply(chunks[0]); // 首段用 editReply
+        for (let i = 1; i < chunks.length; i++) {
+            await interaction.followUp(chunks[i]); // 後續用 followUp
+        }
+    }
+};
+
+const splitDiscordMessage = (text, userTag, maxLength = 1950) => {
+    const lines = text.split('\n');
+    const chunks = [];
+    let current = '';
+
+    for (const line of lines) {
+        if ((current + '\n' + line).length > maxLength) {
+            chunks.push(current.trim());
+            current = line;
+        } else {
+            current += '\n' + line;
+        }
+    }
+    if (current.trim()) chunks.push(current.trim());
+
+    // 第二段以後加註段落標記
+    if (chunks.length > 1) {
+        return chunks.map((chunk, idx) =>
+            idx === 0 ? chunk : `\`(第 ${idx + 1} 段 / 共 ${chunks.length} 段)\` - ${userTag}\n${chunk}`
+        );
+    }
+    return chunks;
 };
 
 // 使用 Gemini 模型
@@ -154,4 +185,3 @@ async function askOpenRouter(prompt, modelOverride) {
         model: modelName
     };
 }
-

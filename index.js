@@ -8,7 +8,7 @@ dotenv.config();
 
 console.log("___________________________________");
 
-//#region 初始化啟動
+//#region 環境初始化
 
 // 建立 Discord client 實例
 const client = new Client({
@@ -19,12 +19,34 @@ const client = new Client({
     ],
 });
 
-// 啟動 Express Web 伺服器
+// 初始化 Express Web
 const app = express();
-const port = process.env.PORT || 3000;
+
+// 中介處理
+app.use((req, res, next) => {
+    // !stopTheDiscordBot 則返回空響應，不處理請求
+    if (isStoppingBot) {
+        console.info("[INFO]已停止服務，拒絕請求");
+        return res.status(204).end();
+    }
+
+    // 收到 cron-job 定時請求
+    if (req.headers['the-cron-job'] === 'true') {
+        console.info(`[INFO]收到請求：${req.method} cron-job.org`);
+    } else {
+        console.info(`[INFO]收到請求：${req.method} ${req.originalUrl}`);
+    }
+    next();
+});
+
+// 設定首頁 Router
+app.get("/", (req, res) => {
+    res.send("サポちゃん大地に立つ!!");
+});
 
 // 啟動 Web 伺服器
-const server = app.listen(port, () => {
+const port = process.env.PORT || 3000;
+app.listen(port, () => {
     console.info(`[INFO]Web Server 正在埠 ${port} 運行`);
 });
 
@@ -65,27 +87,6 @@ const overrideConsole = (type) => {
         }
     };
 };
-
-app.use((req, res, next) => {
-    // !stopTheDiscordBot 則返回空響應，不處理請求
-    if (isStoppingBot) {
-        console.info("[INFO]已停止服務，拒絕請求");
-        return res.status(204).end();
-    }
-
-    // 收到 cron-job 定時請求
-    if (req.headers['the-cron-job'] === 'true') {
-        console.info(`[INFO]收到請求：${req.method} cron-job.org`);
-    } else {
-        console.info(`[INFO]收到請求：${req.method} ${req.originalUrl}`);
-    }
-    next();
-});
-
-// 設定首頁 Router
-app.get("/", (req, res) => {
-    res.send("サポちゃん大地に立つ!!");
-});
 
 // 初始化 REST 客戶端
 const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN);
@@ -186,16 +187,17 @@ const theCommands = [
         options: [
             {
                 name: "提問",
-                description: "要提問的內容",
+                description: "請輸入要提問的內容；或是設定對話前提/清除前提與記憶",
                 type: 3,  // 文字類型
                 required: true,
+                autocomplete: true,  // 加入提示
             },
             {
                 name: "模型",
                 description: "切換使用模型(選填)",
                 type: 3,
                 required: false,
-                choices: MODEL_CHOICES // 定義在 askHandler.js 內
+                choices: MODEL_CHOICES  // 定義在 askHandler.js 內
             },
         ],
     },
@@ -206,6 +208,19 @@ client.on("interactionCreate", async (interaction) => {
     // !stopTheDiscordBot 後進入假眠
     if (isStoppingBot) return;
 
+    // Autocomplete 提示邏輯
+    if (interaction.isAutocomplete()) {
+        const focused = interaction.options.getFocused();
+        const choices = [
+            { name: "設定對話前提", value: "__setask__" },
+            { name: "清除前提與記憶", value: "__clsask__" },
+        ];
+        const filtered = choices.filter(choice => choice.name.startsWith(focused));
+        await interaction.respond(filtered);
+        return;
+    }
+
+    // 不處理非指令互動
     if (!interaction.isCommand()) return;
 
     // /help
@@ -225,18 +240,30 @@ client.on("interactionCreate", async (interaction) => {
             });
         }
 
-        // 確保 query 參數不為空
         const query = interaction.options.getString("提問");
+        const selectedModel = interaction.options.getString("模型");
+
+        // 確保 query 參數不為空
         if (!query) {
             return interaction.reply({
                 content: "サポちゃん不會讀心！！ 請提問！！",
                 flags: 64,  // 僅顯示給該用戶
             });
         }
-        // 取得選擇的模型
-        const selectedModel = interaction.options.getString("模型");
 
-        await slashAsk(interaction, query, selectedModel);
+        // 若為特殊選項
+        if (query.startsWith("__setask__")) {
+            const content = query.replace("__setask__", "").trim();
+            console.log('content'+content);
+            console.log('query'+query);
+            return;
+            //return await setAsk(interaction, content);  // 將內容傳入 setAsk()
+        }
+        if (query === "__setask__") return;  //// (await setAsk();
+        if (query === "__clsask__") return;  //// (await clsAsk();
+
+        //await slashAsk(interaction, query, selectedModel);
+        return;
     }
 });
 

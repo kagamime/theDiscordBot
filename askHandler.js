@@ -1,5 +1,7 @@
 import fetch from 'node-fetch';  // 用於發送 HTTP 請求
 
+//#region 模型清單
+
 // 模型清單，鍵名作為 enum 選項值
 const MODEL_OPTIONS = {
     gemini_2_0_flash: {
@@ -29,23 +31,27 @@ export const MODEL_CHOICES = Object.entries(MODEL_OPTIONS).map(([key, value]) =>
     name: `${value.name}：${value.description}`, // 顯示在選單上的文字
     value: key, // 實際傳到指令處理器的值
 }));
+//#endregion
 
-// 主要處理 ASK 命令
+// ASK 命令主邏輯
 export const slashAsk = async (interaction, content, selectedModel) => {
-    await interaction.deferReply(); // 告知 Discord 延遲回應
+    await interaction.deferReply();  // 告知 Discord 延遲回應
 
     const modelKeys = Object.keys(MODEL_OPTIONS);
-    selectedModel = selectedModel || modelKeys[0];
+    selectedModel = modelKeys.includes(selectedModel) ? selectedModel : modelKeys[0];  // 檢查輸入選項合法性
     const startIndex = modelKeys.indexOf(selectedModel);
 
     let aiReply = '', modelName = '', fallbackNotice = '';
+    const userId = interaction.user.id;
     const userTag = interaction.user.tag;
 
-    // 確保從選定模型開始循環
-    let triedModels = 0; // 記錄嘗試過的模型數量
-    let initialModel = selectedModel; // 記錄最初的選定模型
+    // 組合上下文
+    //// const fullPrompt = await composeFullPrompt(userId, content, searchSummary);
 
+    let triedModels = 0;  // 記錄嘗試過的模型數量
+    let initialModel = selectedModel;  // 記錄最初的選定模型
     while (triedModels < modelKeys.length) {
+        // 從選定模型往後開始循環
         const key = modelKeys[(startIndex + triedModels) % modelKeys.length];
 
         try {
@@ -77,18 +83,18 @@ export const slashAsk = async (interaction, content, selectedModel) => {
 
     // 記錄並格式化回覆
     const formattedReply = [
-        `> ${content} - <@${interaction.user.id}>`, // 原提問
+        `> ${content} - <@${userId}>`, // 原提問
         aiReply,         // 模型的回應內容
         fallbackNotice,  // 沒有回應的模型提示
         aiReply && `\`by ${modelName}\`` // 模型名稱
     ].filter(Boolean).join('\n');
 
-    const chunks = splitDiscordMessage(formattedReply, `<@${interaction.user.id}>`);
     // 發送分段訊息
+    const chunks = splitDiscordMessage(formattedReply, `<@${userId}>`);
     if (chunks.length > 0) {
-        await interaction.editReply(chunks[0]); // 首段用 editReply
+        await interaction.editReply(chunks[0]);
         for (let i = 1; i < chunks.length; i++) {
-            await interaction.followUp(chunks[i]); // 後續用 followUp
+            await interaction.followUp(chunks[i]);
         }
     }
 };
@@ -117,6 +123,8 @@ const splitDiscordMessage = (text, userTag, maxLength = 1950) => {
     }
     return chunks;
 };
+
+//#region 模型實作
 
 // 使用 Gemini 模型
 async function askGemini(prompt, modelConfig) {
@@ -172,7 +180,7 @@ async function askOpenrouter(prompt, modelConfig) {
 
     if (!response.ok) {
         console.error(`[ERROR]Openrouter Error: ${response.statusText}`);
-        return { content: '', model: modelName }; // 空回應
+        return { content: '', model: modelName };  // 空回應
     }
 
     const data = await response.json();
@@ -181,3 +189,4 @@ async function askOpenrouter(prompt, modelConfig) {
         model: modelName
     };
 }
+//#endregion

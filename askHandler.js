@@ -1,9 +1,7 @@
 import fetch from 'node-fetch';  // 用於發送 HTTP 請求
 
-//#region 模型清單
-
 // 模型清單，鍵名作為 enum 選項值
-const MODEL_OPTIONS = {
+export const MODEL_OPTIONS = {
     gemini_2_0_flash: {
         name: 'gemini-2.0-flash',
         description: "低延遲的模型，適合快速回答。",
@@ -26,14 +24,17 @@ const MODEL_OPTIONS = {
     },
 };
 
-// 產生 Discord 的模型選項用於註冊
-export const MODEL_CHOICES = Object.entries(MODEL_OPTIONS).map(([key, value]) => ({
-    name: `${value.name}：${value.description}`, // 顯示在選單上的文字
-    value: key, // 實際傳到指令處理器的值
-}));
-//#endregion
+// ASK 設定對話前提
+export const setAsk = async (interaction, content) => {
+    return;
+};
 
-// ASK 命令主邏輯
+// ASK 清除前提與對話記憶
+export const clsAsk = async (interaction) => {
+    return;
+};
+
+// ASK 提問主邏輯
 export const slashAsk = async (interaction, content, selectedModel) => {
     await interaction.deferReply();  // 告知 Discord 延遲回應
 

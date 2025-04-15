@@ -1,7 +1,7 @@
 import { Client, GatewayIntentBits, REST, Routes } from "discord.js";
 import { slashHelp, rollDice } from "./misc.js";
 import { theTimestamp } from "./timestamp.js";
-import { slashAsk, MODEL_CHOICES } from "./askHandler.js";
+import { slashAsk, setAsk, clsAsk, MODEL_OPTIONS } from "./askHandler.js";
 import express from "express";
 import dotenv from "dotenv";
 dotenv.config();
@@ -187,17 +187,17 @@ const theCommands = [
         options: [
             {
                 name: "提問",
-                description: "請輸入要提問的內容；或是設定對話前提/清除前提與記憶",
+                description: "請直接輸入要詢問的內容；或選擇「設定對話前提」與「清除前提與記憶」功能",
                 type: 3,  // 文字類型
                 required: true,
                 autocomplete: true,  // 加入提示
             },
             {
-                name: "模型",
-                description: "切換使用模型(選填)",
+                name: "追記",
+                description: "可切換使用的模型（選填）；或在「設定對話前提」時輸入內容",
                 type: 3,
                 required: false,
-                choices: MODEL_CHOICES  // 定義在 askHandler.js 內
+                autocomplete: true,
             },
         ],
     },
@@ -211,12 +211,36 @@ client.on("interactionCreate", async (interaction) => {
     // Autocomplete 提示邏輯
     if (interaction.isAutocomplete()) {
         const focused = interaction.options.getFocused();
-        const choices = [
-            { name: "設定對話前提", value: "__setask__" },
-            { name: "清除前提與記憶", value: "__clsask__" },
-        ];
-        const filtered = choices.filter(choice => choice.name.startsWith(focused));
-        await interaction.respond(filtered);
+        const focusedOption = interaction.options.getFocused(true);
+
+        if (focusedOption.name === "提問") {
+            const choices = [
+                { name: "設定對話前提 → 請於後方追記欄輸入內容", value: "__setask__" },
+                { name: "清除前提與記憶", value: "__clsask__" },
+            ];
+            const filtered = choices.filter(choice => choice.name.startsWith(focused));
+            await interaction.respond(filtered);
+            return;
+        }
+
+        if (focusedOption.name === "追記") {
+            const query = interaction.options._hoistedOptions.find(opt => opt.name === "提問")?.value;
+            const isQuery = ["__setask__", "__clsask__"].includes(query);
+
+            // 不在提問選項內時才提供模型選項
+            if (!isQuery) {
+                const modelChoices = Object.entries(MODEL_OPTIONS)  // 定義在 askHandler.js 內
+                    .map(([key, value]) => ({
+                        name: `${value.name}：${value.description}`, // 顯示在選單上的文字
+                        value: key, // 實際傳到指令處理器的值
+                    }))
+                    .filter(choice => choice.name.toLowerCase().includes(focused.toLowerCase()));
+                await interaction.respond(modelChoices.slice(0, 25)); // Discord 限制最多 25 筆
+            } else {
+                await interaction.respond([]);
+            }
+            return;
+        }
         return;
     }
 
@@ -241,28 +265,24 @@ client.on("interactionCreate", async (interaction) => {
         }
 
         const query = interaction.options.getString("提問");
-        const selectedModel = interaction.options.getString("模型");
+        const addendum = interaction.options.getString("追記");
 
-        // 確保 query 參數不為空
-        if (!query) {
-            return interaction.reply({
-                content: "サポちゃん不會讀心！！ 請提問！！",
-                flags: 64,  // 僅顯示給該用戶
-            });
+        switch (query) {
+            case "__setask__":  // 設定對話前提
+                if (!premise) {
+                    return interaction.reply({
+                        content: "サポちゃん不會讀心！！ 請在「追記」中輸入前提！！",
+                        flags: 64,
+                    });
+                }
+                await setAsk(interaction, addendum);
+                break;
+            case "__clsask__":  // 清除前提與記憶
+                await clsAsk(interaction);
+                break;
+            default:  // 詢問內容
+                await slashAsk(interaction, query, addendum);
         }
-
-        // 若為特殊選項
-        if (query.startsWith("__setask__")) {
-            const content = query.replace("__setask__", "").trim();
-            console.log('content'+content);
-            console.log('query'+query);
-            return;
-            //return await setAsk(interaction, content);  // 將內容傳入 setAsk()
-        }
-        if (query === "__setask__") return;  //// (await setAsk();
-        if (query === "__clsask__") return;  //// (await clsAsk();
-
-        //await slashAsk(interaction, query, selectedModel);
         return;
     }
 });

@@ -1,5 +1,15 @@
 import fetch from 'node-fetch';  // 用於發送 HTTP 請求
 
+// 記憶體儲存：userId => { context: [{ q, a }], preset: string, lastInteraction: number }
+const memoryStore = new Map();
+// 初始化 Map 結構
+const createDefaultRecord = () => ({
+    context: [],        // 最近對話記錄
+    preset: "",         // 對話前提
+    summary: "",        // 前情摘要
+    lastInteraction: 0  // 最後對話時間戳
+});
+
 // 模型清單，鍵名作為 enum 選項值
 export const MODEL_OPTIONS = {
     gemini_2_0_flash: {
@@ -24,14 +34,57 @@ export const MODEL_OPTIONS = {
     },
 };
 
+// 對話記憶上限
+const MAX_CONTEXT_LENGTH = 6;
+// 時限內未互動，進行主題檢查
+const CONTEXT_TIMEOUT_MINUTES = 10;
+
 // ASK 設定對話前提
 export const setAsk = async (interaction, content) => {
-    return;
+    await interaction.deferReply();  // 告知 Discord 延遲回應
+
+    const userId = interaction.user.id;
+    const userTag = interaction.user.tag;
+    const record = memoryStore.get(userId) || createDefaultRecord();
+
+    if (!content.trim()) {
+        if (record.preset) {
+            console.log(`[SET]${userTag}>查詢前提：${record.preset}`);
+            await interaction.editReply({
+                content: `\`目前的對話前提：\`\n>>> ${record.preset}`,
+                flags: 64,
+            });
+        } else {
+            console.log(`[SET]${userTag}>查詢前提：（尚未設定）`);
+            await interaction.editReply({
+                content: `\`目前還沒有對話前提！！\``,
+                flags: 64,
+            });
+        }
+        return;
+    }
+
+    // 有傳入內容，設定新的前提
+    record.preset = content.trim();
+    memoryStore.set(userId, record);
+
+    console.log(`[SET]${userTag}>設定前提：${record.preset}`);
+    await interaction.editReply({
+        content: `\`已設定對話前提！！\`\n>>> ${record.preset}`,
+        flags: 64,
+    });
 };
 
 // ASK 清除前提與對話記憶
 export const clsAsk = async (interaction) => {
-    return;
+    await interaction.deferReply();  // 告知 Discord 延遲回應
+
+    memoryStore.delete(interaction.user.id);
+    console.log(`[SET]${interaction.user.tag}>清除前提記憶`);
+    await interaction.editReply({
+        content: "\`已清除對話前提與記憶！！\`",
+        flags: 64,
+    });
 };
 
 // ASK 提問主邏輯
@@ -40,15 +93,21 @@ export const slashAsk = async (interaction, content, selectedModel) => {
 
     const modelKeys = Object.keys(MODEL_OPTIONS);
     selectedModel = modelKeys.includes(selectedModel) ? selectedModel : modelKeys[0];  // 檢查輸入選項合法性
-    const startIndex = modelKeys.indexOf(selectedModel);
+    const startIndex = modelKeys.indexOf(selectedModel);  // 初始選定模型
 
     let aiReply = '', modelName = '', fallbackNotice = '';
     const userId = interaction.user.id;
     const userTag = interaction.user.tag;
 
-    // 組合上下文
-    //// const fullPrompt = await composeFullPrompt(userId, content, searchSummary);
+    //// 十分鐘未互動，進行主題檢查(使用const record.lastInteraction記錄個別使用者最後對話時間，新對話若超過十分鐘就讓LLM判斷主題跟前面記憶是否相同，不同則清空記憶)
 
+    //// 之後實作網路搜尋提供參考功能searchSummary，限制長度const MAX_SEARCH_SUMMARY_LENGTH = 700，從\n截斷
+    const searchSummary = "";
+
+    // 組合上下文
+    const fullPrompt = await composeFullPrompt(userId, content, searchSummary);
+
+    //#region 詢問模型流程
     let triedModels = 0;  // 記錄嘗試過的模型數量
     let initialModel = selectedModel;  // 記錄最初的選定模型
     while (triedModels < modelKeys.length) {
@@ -56,15 +115,27 @@ export const slashAsk = async (interaction, content, selectedModel) => {
         const key = modelKeys[(startIndex + triedModels) % modelKeys.length];
 
         try {
-            const result = await MODEL_OPTIONS[key].handler(content, MODEL_OPTIONS[key]);
+            // 詢問 LLM
+            const result = await MODEL_OPTIONS[key].handler(fullPrompt, MODEL_OPTIONS[key]);
 
             if (result?.content) {
                 aiReply = result.content;
                 modelName = result.model;
 
-                // 記錄模型切換
+                // log 模型切換
                 const switchLog = key !== initialModel ? ` -> \`${MODEL_OPTIONS[key].name}\`` : '';
                 console.log(`[REPLY]${userTag}> \`/ask\` ${content} - \`${MODEL_OPTIONS[initialModel].name}\`${switchLog}`);
+
+                // 儲存對話記憶
+                //// 之後實作壓縮記憶
+                const record = memoryStore.get(userId) || createDefaultRecord();
+                record.context.push({ q: content, a: aiReply });
+                if (record.context.length > MAX_CONTEXT_LENGTH) {
+                    record.context.shift();  // 超出記憶上限則移除最舊的一筆
+                    //// 移除記憶之後整進摘要const record.summary
+                }
+                memoryStore.set(userId, record);
+
                 break;  // 找到有效回應後跳出循環
             } else {
                 console.warn(`[WARN]\`${MODEL_OPTIONS[key].name}\`回應無效，嘗試下一個模型`);
@@ -81,6 +152,7 @@ export const slashAsk = async (interaction, content, selectedModel) => {
     if (!aiReply) {
         console.log(`[REPLY]${userTag}> \`/ask\` ${content} - \`${MODEL_OPTIONS[initialModel].name}\` -> \`（模型皆無回應）\``);
     }
+    //#endregion
 
     // 記錄並格式化回覆
     const formattedReply = [
@@ -98,6 +170,30 @@ export const slashAsk = async (interaction, content, selectedModel) => {
             await interaction.followUp(chunks[i]);
         }
     }
+};
+
+// 組合完整 prompt
+const composeFullPrompt = async (userId, currentQuestion, searchSummary = "") => {
+    const record = memoryStore.get(userId) || createDefaultRecord();
+
+    const { preset, context } = record;
+
+    const formattedContext = context.length > 0
+        ? `（以下為你與使用者過去的對話供參考）\n` +
+        context.map(item => `使用者：${item.q}\n你：${item.a}`).join("\n\n")
+        : "";
+
+    // 前提 + 上下文 + 搜尋結果 + 當前提問
+    //// 之後追加前情摘要在上下文之前
+    const fullPrompt = [
+        preset && `前提：${preset}`,
+        formattedContext,
+        searchSummary ? `（以下為搜尋結果參考）\n${searchSummary}` : '',
+        `使用者：${currentQuestion}`
+    ].filter(Boolean).join("\n\n");
+
+    console.log("組合上下文：" + fullPrompt);  //// 檢查用
+    return fullPrompt;
 };
 
 // 分段訊息

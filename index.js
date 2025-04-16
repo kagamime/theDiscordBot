@@ -215,7 +215,7 @@ client.on("interactionCreate", async (interaction) => {
 
         if (focusedOption.name === "提問") {
             const choices = [
-                { name: "設定對話前提 → 請於後方追記欄輸入內容", value: "__setask__" },
+                { name: "查詢或設定前提 → 可於後方追記欄輸入對話前提", value: "__setask__" },
                 { name: "清除前提與記憶", value: "__clsask__" },
             ];
             const filtered = choices.filter(choice => choice.name.startsWith(focused));
@@ -269,12 +269,6 @@ client.on("interactionCreate", async (interaction) => {
 
         switch (query) {
             case "__setask__":  // 設定對話前提
-                if (!premise) {
-                    return interaction.reply({
-                        content: "サポちゃん不會讀心！！ 請在「追記」中輸入前提！！",
-                        flags: 64,
-                    });
-                }
                 await setAsk(interaction, addendum);
                 break;
             case "__clsask__":  // 清除前提與記憶

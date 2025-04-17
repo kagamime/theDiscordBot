@@ -34,10 +34,21 @@ export const MODEL_OPTIONS = {
     },
 };
 
-// 對話記憶上限
-const MAX_CONTEXT_LENGTH = 6;
-// 時限內未互動，進行主題檢查
-const CONTEXT_TIMEOUT_MINUTES = 10;
+const MAX_DISCORD_REPLY_LENGTH = 1950;  // Discord 單則訊息的字數上限
+const MAX_SEARCH_SUMMARY_LENGTH = 700;  // 網路搜尋結果的字數上限
+const CONTEXT_TIMEOUT_MINUTES = 10;      // 時限內未互動，進行主題檢查
+const MAX_CONTEXT_ROUND = 5;             // 對話記憶上限
+const SUMMARY_ROUND_COUNT = 3;           // 摘要化舊對話輪數
+const COMPRESSION_TRIGGER_LENGTH = 300;  // 上下文壓縮閾值
+const COMPRESSION_TARGET_TOKENS = {      // 上下文壓縮率(token)
+    threshold: 200,  // 第 2 輪對話後壓縮率
+    merge: 450,      // 前情摘要篇幅
+};
+
+// 常數相依性檢查
+if (SUMMARY_ROUND_COUNT >= MAX_CONTEXT_ROUND) {
+    throw new Error(`[ERROR]SUMMARY_ROUND_COUNT (${SUMMARY_ROUND_COUNT}) 必須小於 MAX_CONTEXT_ROUND (${MAX_CONTEXT_ROUND})`);
+}
 
 // ASK 設定對話前提
 export const setAsk = async (interaction, content) => {
@@ -101,8 +112,10 @@ export const slashAsk = async (interaction, content, selectedModel) => {
 
     //// 十分鐘未互動，進行主題檢查(使用const record.lastInteraction記錄個別使用者最後對話時間，新對話若超過十分鐘就讓LLM判斷主題跟前面記憶是否相同，不同則清空記憶)
 
-    //// 之後實作網路搜尋提供參考功能searchSummary，限制長度const MAX_SEARCH_SUMMARY_LENGTH = 700，從\n截斷
+    //// 之後實作網路搜尋提供參考功能searchSummary
     const searchSummary = "";
+    // 搜尋結果篇幅限制
+    searchSummary = splitDiscordMessage(interaction, searchSummary, MAX_SEARCH_SUMMARY_LENGTH)[0];
 
     // 組合上下文
     const fullPrompt = await composeFullPrompt(userId, content, searchSummary);
@@ -126,14 +139,38 @@ export const slashAsk = async (interaction, content, selectedModel) => {
                 const switchLog = key !== initialModel ? ` -> \`${MODEL_OPTIONS[key].name}\`` : '';
                 console.log(`[REPLY]${userTag}> \`/ask\` ${content} - \`${MODEL_OPTIONS[initialModel].name}\`${switchLog}`);
 
-                // 儲存對話記憶
-                //// 之後實作壓縮記憶
+                // 儲存對話記憶並處理壓縮
                 const record = memoryStore.get(userId) || createDefaultRecord();
-                record.context.push({ q: content, a: aiReply });
-                if (record.context.length > MAX_CONTEXT_LENGTH) {
-                    record.context.shift();  // 超出記憶上限則移除最舊的一筆
-                    //// 移除記憶之後整進摘要const record.summary
+                const newRound = { q: content, a: aiReply };
+                const contextLength = record.context.length;
+                if (contextLength >= 1) {
+                    const prevRound = record.context[contextLength - 1];  // 僅對倒數第 2 輪進行
+
+                    if (prevRound.q.length > COMPRESSION_TRIGGER_LENGTH) {
+                        prevRound.q = await compressTextWithLLM(prevRound.q, COMPRESSION_TARGET_TOKENS.threshold, key);
+                    }
+
+                    if (prevRound.a.length > COMPRESSION_TRIGGER_LENGTH) {
+                        prevRound.a = await compressTextWithLLM(prevRound.a, COMPRESSION_TARGET_TOKENS.threshold, key);
+                    }
                 }
+
+                // 推入最新對話
+                record.context.push(newRound);
+
+                // 檢查對話輪數並前情摘要化
+                if (record.context.length > MAX_CONTEXT_ROUND) {
+                    const overflow = record.context.splice(0, SUMMARY_ROUND_COUNT);  // 取出前面的
+                    const mergedText = [
+                        record.summary,
+                        ...overflow.map(item => `使用者：${item.q}\n你：${item.a}`)
+                    ].filter(Boolean).join("\n\n");
+
+                    const summaryResult = await compressTextWithLLM(mergedText, ANSWER_SUMMARY_TARGET_TOKENS.merge, key);
+                    record.summary = summaryResult;
+                }
+
+                // 更新記憶
                 memoryStore.set(userId, record);
 
                 break;  // 找到有效回應後跳出循環
@@ -163,7 +200,7 @@ export const slashAsk = async (interaction, content, selectedModel) => {
     ].filter(Boolean).join('\n');
 
     // 發送分段訊息
-    const chunks = splitDiscordMessage(formattedReply, `<@${userId}>`);
+    const chunks = splitDiscordMessage(interaction, formattedReply, MAX_DISCORD_REPLY_LENGTH);
     if (chunks.length > 0) {
         await interaction.editReply(chunks[0]);
         for (let i = 1; i < chunks.length; i++) {
@@ -176,28 +213,39 @@ export const slashAsk = async (interaction, content, selectedModel) => {
 const composeFullPrompt = async (userId, currentQuestion, searchSummary = "") => {
     const record = memoryStore.get(userId) || createDefaultRecord();
 
-    const { preset, context } = record;
+    const { preset, context, summary } = record;
 
+    const formattedSummary = summary ? `（以下為前情摘要供參考）\n${summary}` : "";
     const formattedContext = context.length > 0
         ? `（以下為你與使用者過去的對話供參考）\n` +
         context.map(item => `使用者：${item.q}\n你：${item.a}`).join("\n\n")
         : "";
 
-    // 前提 + 上下文 + 搜尋結果 + 當前提問
-    //// 之後追加前情摘要在上下文之前
+    // 前提 + 前情摘要 + 上下文 + 搜尋結果 + 當前提問
     const fullPrompt = [
         preset && `前提：${preset}`,
+        formattedSummary,
         formattedContext,
         searchSummary ? `（以下為搜尋結果參考）\n${searchSummary}` : '',
         `使用者：${currentQuestion}`
     ].filter(Boolean).join("\n\n");
 
-    console.log("組合上下文：" + fullPrompt);  //// 檢查用
+    console.log("[DEBUG]組合上下文：" + fullPrompt);  //// DEBUG檢查用
     return fullPrompt;
 };
 
+// 摘要壓縮
+const compressTextWithLLM = async (text, targetTokens, modelKey) => {
+    const prompt = `請將以下段落濃縮成不超過 ${targetTokens} token 的摘要，保留關鍵資訊與主要邏輯脈絡：\n\n${text}`;
+    const result = await MODEL_OPTIONS[modelKey].handler(prompt, MODEL_OPTIONS[modelKey]);
+    return result?.content || '';
+};
+
 // 分段訊息
-const splitDiscordMessage = (text, userTag, maxLength = 1950) => {
+const splitDiscordMessage = (interaction, text, maxLength) => {
+    // 字數沒過不用處理
+    if (text.length <= maxLength) return [text]; 
+
     const lines = text.split('\n');
     const chunks = [];
     let current = '';
@@ -215,7 +263,7 @@ const splitDiscordMessage = (text, userTag, maxLength = 1950) => {
     // 第二段以後加註段落標記
     if (chunks.length > 1) {
         return chunks.map((chunk, idx) =>
-            idx === 0 ? chunk : `\`(第 ${idx + 1} 段 / 共 ${chunks.length} 段)\` - ${userTag}\n${chunk}`
+            idx === 0 ? chunk : `\`(第 ${idx + 1} 段 / 共 ${chunks.length} 段)\` - ${interaction.user.tag}\n${chunk}`
         );
     }
     return chunks;

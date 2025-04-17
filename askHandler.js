@@ -33,6 +33,7 @@ export const MODEL_OPTIONS = {
         handler: askOpenrouter,
     },
 };
+const modelKeys = Object.keys(MODEL_OPTIONS);
 
 const MAX_DISCORD_REPLY_LENGTH = 1950;  // Discord 單則訊息的字數上限
 const MAX_SEARCH_SUMMARY_LENGTH = 700;  // 網路搜尋結果的字數上限
@@ -102,94 +103,84 @@ export const clsAsk = async (interaction) => {
 export const slashAsk = async (interaction, content, selectedModel) => {
     await interaction.deferReply();  // 告知 Discord 延遲回應
 
-    const modelKeys = Object.keys(MODEL_OPTIONS);
     selectedModel = modelKeys.includes(selectedModel) ? selectedModel : modelKeys[0];  // 檢查輸入選項合法性
-    const startIndex = modelKeys.indexOf(selectedModel);  // 初始選定模型
+    let useModel = selectedModel;
 
     let aiReply = '', modelName = '', fallbackNotice = '';
     const userId = interaction.user.id;
     const userTag = interaction.user.tag;
+    const record = memoryStore.get(userId) || createDefaultRecord();
+    //const record = { ...memoryStore.get(userId) } || createDefaultRecord(); //// 之後重新了解這樣做意義
 
-    //// 十分鐘未互動，進行主題檢查(使用const record.lastInteraction記錄個別使用者最後對話時間，新對話若超過十分鐘就讓LLM判斷主題跟前面記憶是否相同，不同則清空記憶)
+
+    // 十分鐘未互動清空記憶
+    //// 之後改成進行主題檢查(新對話若超過十分鐘就讓LLM判斷主題跟前面記憶是否相同，不同則清空記憶)
+    const now = Date.now();
+    record.lastInteraction = now;  // 互動後記下當前時間戳
+    const timeoutThreshold = CONTEXT_TIMEOUT_MINUTES * 60 * 1000;
+    if (now - record.lastInteraction > timeoutThreshold) {
+        record.context = [];
+        record.summary = "";
+        memoryStore.set(userId, record);
+    }
 
     //// 之後實作網路搜尋提供參考功能searchSummary
-    const searchSummary = "";
+    let searchSummary = "";
     // 搜尋結果篇幅限制
     searchSummary = splitDiscordMessage(interaction, searchSummary, MAX_SEARCH_SUMMARY_LENGTH)[0];
 
     // 組合上下文
     const fullPrompt = await composeFullPrompt(userId, content, searchSummary);
 
-    //#region 詢問模型流程
-    let triedModels = 0;  // 記錄嘗試過的模型數量
-    let initialModel = selectedModel;  // 記錄最初的選定模型
-    while (triedModels < modelKeys.length) {
-        // 從選定模型往後開始循環
-        const key = modelKeys[(startIndex + triedModels) % modelKeys.length];
+    // 詢問 LLM
+    
+    const result = await askLLM(fullPrompt, useModel);
+    aiReply = result.response;
+    useModel = result.usableModel;
+    modelName = MODEL_OPTIONS[useModel].name;
 
-        try {
-            // 詢問 LLM
-            const result = await MODEL_OPTIONS[key].handler(fullPrompt, MODEL_OPTIONS[key]);
+    if (!aiReply) {
+        await interaction.editReply("目前所有模型皆無回應，請稍後再試。");
+        return;
+    }
+    if (useModel !== selectedModel) {
+        fallbackNotice = `\`${MODEL_OPTIONS[selectedModel].name} 沒回應\``;
+    }
+    const switchLog = useModel !== selectedModel ? ` -> \`${MODEL_OPTIONS[useModel].name}\`` : '';
+    console.log(`[REPLY]${userTag}> \`/ask\` ${content} - \`${MODEL_OPTIONS[selectedModel].name}\`${switchLog}`);
 
-            if (result?.content) {
-                aiReply = result.content;
-                modelName = result.model;
+    // 儲存對話記憶並處理壓縮
+    const newRound = { q: content, a: aiReply };
+    const contextLength = record.context.length;
+    if (contextLength >= 1) {
+        const prevRound = record.context[contextLength - 1];  // 僅對倒數第 2 輪進行
 
-                // log 模型切換
-                const switchLog = key !== initialModel ? ` -> \`${MODEL_OPTIONS[key].name}\`` : '';
-                console.log(`[REPLY]${userTag}> \`/ask\` ${content} - \`${MODEL_OPTIONS[initialModel].name}\`${switchLog}`);
-
-                // 儲存對話記憶並處理壓縮
-                const record = memoryStore.get(userId) || createDefaultRecord();
-                const newRound = { q: content, a: aiReply };
-                const contextLength = record.context.length;
-                if (contextLength >= 1) {
-                    const prevRound = record.context[contextLength - 1];  // 僅對倒數第 2 輪進行
-
-                    if (prevRound.q.length > COMPRESSION_TRIGGER_LENGTH) {
-                        prevRound.q = await compressTextWithLLM(prevRound.q, COMPRESSION_TARGET_TOKENS.threshold, key);
-                    }
-
-                    if (prevRound.a.length > COMPRESSION_TRIGGER_LENGTH) {
-                        prevRound.a = await compressTextWithLLM(prevRound.a, COMPRESSION_TARGET_TOKENS.threshold, key);
-                    }
-                }
-
-                // 推入最新對話
-                record.context.push(newRound);
-
-                // 檢查對話輪數並前情摘要化
-                if (record.context.length > MAX_CONTEXT_ROUND) {
-                    const overflow = record.context.splice(0, SUMMARY_ROUND_COUNT);  // 取出前面的
-                    const mergedText = [
-                        record.summary,
-                        ...overflow.map(item => `使用者：${item.q}\n你：${item.a}`)
-                    ].filter(Boolean).join("\n\n");
-
-                    const summaryResult = await compressTextWithLLM(mergedText, ANSWER_SUMMARY_TARGET_TOKENS.merge, key);
-                    record.summary = summaryResult;
-                }
-
-                // 更新記憶
-                memoryStore.set(userId, record);
-
-                break;  // 找到有效回應後跳出循環
-            } else {
-                console.warn(`[WARN]\`${MODEL_OPTIONS[key].name}\`回應無效，嘗試下一個模型`);
-            }
-        } catch (err) {
-            console.error(`[ERROR]執行 ${MODEL_OPTIONS[key].name} 時發生錯誤:`, err);
+        if (prevRound.q.length > COMPRESSION_TRIGGER_LENGTH) {
+            prevRound.q = await compressTextWithLLM(prevRound.q, COMPRESSION_TARGET_TOKENS.threshold, useModel);
         }
 
-        fallbackNotice = `\`${MODEL_OPTIONS[initialModel].name} 沒回應\``;
-        triedModels++;
+        if (prevRound.a.length > COMPRESSION_TRIGGER_LENGTH) {
+            prevRound.a = await compressTextWithLLM(prevRound.a, COMPRESSION_TARGET_TOKENS.threshold, useModel);
+        }
     }
 
-    // 如果沒有任何模型回應
-    if (!aiReply) {
-        console.log(`[REPLY]${userTag}> \`/ask\` ${content} - \`${MODEL_OPTIONS[initialModel].name}\` -> \`（模型皆無回應）\``);
+    // 推入最新對話
+    record.context.push(newRound);
+
+    // 檢查對話輪數並前情摘要化
+    if (record.context.length > MAX_CONTEXT_ROUND) {
+        const overflow = record.context.splice(0, SUMMARY_ROUND_COUNT);  // 取出前面的
+        const mergedText = [
+            record.summary,
+            ...overflow.map(item => `使用者：${item.q}\n你：${item.a}`)
+        ].filter(Boolean).join("\n\n");
+
+        const summaryResult = await compressTextWithLLM(mergedText, ANSWER_SUMMARY_TARGET_TOKENS.merge, useModel);
+        record.summary = summaryResult;
     }
-    //#endregion
+
+    // 更新記憶
+    memoryStore.set(userId, record);
 
     // 記錄並格式化回覆
     const formattedReply = [
@@ -208,6 +199,46 @@ export const slashAsk = async (interaction, content, selectedModel) => {
         }
     }
 };
+
+// 遍歷可用模型並詢問 LLM
+const askLLM = async (query, useModel) => {
+    let triedModels = 0;  // 記錄嘗試過的模型數量
+    let key = null;
+    let answer = null;
+
+    while (triedModels < modelKeys.length) {
+        // 從選定模型往後開始循環
+        key = modelKeys[(modelKeys.indexOf(useModel) + triedModels) % modelKeys.length];
+
+        try {
+            // 詢問 LLM
+            answer = await MODEL_OPTIONS[key].handler(query, MODEL_OPTIONS[key]);
+            //useModel
+            if (typeof answer === 'string' && answer.trim()) {
+                break;  // 找到有效回應後跳出循環
+            } else {
+                console.warn(`[WARN]\`${MODEL_OPTIONS[key].name}\`回應無效，嘗試下一個模型`);
+            }
+        } catch (err) {
+            console.error(`[ERROR]執行 ${MODEL_OPTIONS[key].name} 時發生錯誤:`, err);
+        }
+
+        triedModels++;
+    }
+
+    if (!answer) {
+        console.log(`[ERROR]模型皆無回應`);
+        return {
+            response: null,
+            usableModel: key,
+        }
+    }
+
+    return {
+        response: answer,
+        usableModel: key,
+    }
+}
 
 // 組合完整 prompt
 const composeFullPrompt = async (userId, currentQuestion, searchSummary = "") => {
@@ -230,21 +261,20 @@ const composeFullPrompt = async (userId, currentQuestion, searchSummary = "") =>
         `使用者：${currentQuestion}`
     ].filter(Boolean).join("\n\n");
 
-    console.log("[DEBUG]組合上下文：" + fullPrompt);  //// DEBUG檢查用
+    console.log(`[DEBUG]組合上下文：\n${fullPrompt}`);  //// DEBUG檢查用
     return fullPrompt;
 };
 
 // 摘要壓縮
-const compressTextWithLLM = async (text, targetTokens, modelKey) => {
+const compressTextWithLLM = async (text, targetTokens, useModel) => {
     const prompt = `請將以下段落濃縮成不超過 ${targetTokens} token 的摘要，保留關鍵資訊與主要邏輯脈絡：\n\n${text}`;
-    const result = await MODEL_OPTIONS[modelKey].handler(prompt, MODEL_OPTIONS[modelKey]);
-    return result?.content || '';
+    return (await askLLM(prompt, useModel)).response || '';
 };
 
 // 分段訊息
 const splitDiscordMessage = (interaction, text, maxLength) => {
     // 字數沒過不用處理
-    if (text.length <= maxLength) return [text]; 
+    if (text.length <= maxLength) return [text];
 
     const lines = text.split('\n');
     const chunks = [];
@@ -296,10 +326,7 @@ async function askGemini(prompt, modelConfig) {
     const data = await response.json();
     const content = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
 
-    return {
-        content,
-        model
-    };
+    return content;
 }
 
 // 使用 Openrouter 模型
@@ -325,13 +352,10 @@ async function askOpenrouter(prompt, modelConfig) {
 
     if (!response.ok) {
         console.error(`[ERROR]Openrouter Error: ${response.statusText}`);
-        return { content: '', model: modelName };  // 空回應
+        return '';  // 空回應
     }
 
     const data = await response.json();
-    return {
-        content: data.choices?.[0]?.message?.content || '',
-        model: modelName
-    };
+    return data.choices?.[0]?.message?.content || '';
 }
 //#endregion

@@ -90,24 +90,22 @@ export const setAsk = async (interaction, content) => {
 
 // ASK 清除前提與對話記憶
 export const clsAsk = async (interaction) => {
-    await interaction.deferReply();  // 告知 Discord 延遲回應
+    await interaction.deferReply({ flags: 64 });  // 告知 Discord 延遲回應，且回應為隱藏
 
     memoryStore.delete(interaction.user.id);
     console.log(`[SET]${interaction.user.tag}>清除前提記憶`);
-    await interaction.editReply({
-        content: "\`已清除對話前提與記憶！！\`",
-        flags: 64,
-    });
+    await interaction.editReply(`\`已清除對話前提與記憶！！\``);
 };
 
 // ASK 提問主邏輯
-export const slashAsk = async (interaction, content, selectedModel) => {
+export const slashAsk = async (interaction, query, selectedModel) => {
     await interaction.deferReply();  // 告知 Discord 延遲回應
 
     selectedModel = modelKeys.includes(selectedModel) ? selectedModel : modelKeys[0];  // 檢查輸入選項合法性
     let useModel = selectedModel;
 
-    let aiReply = '', modelName = '', fallbackNotice = '';
+    let aiReply = '', modelName = '', fallbackNotice = '', searchSummary = '';
+    let content = query;
     const userId = interaction.user.id;
     const userTag = interaction.user.tag;
     const record = cloneRecord(memoryStore.get(userId));
@@ -123,16 +121,16 @@ export const slashAsk = async (interaction, content, selectedModel) => {
         memoryStore.set(userId, record);
     }
 
-    //// 之後實作網路搜尋提供參考功能searchSummary
-    let searchSummary = "";
-    // 搜尋結果篇幅限制
-    searchSummary = splitDiscordMessage(interaction, searchSummary, MAX_SEARCH_SUMMARY_LENGTH)[0];
+    // 網路搜尋提供參考
+    if (content.startsWith('?') || content.startsWith('？')) {
+        content = content.slice(1).trim();
+        searchSummary = await searchGoogle(content);
+    }
 
     // 組合上下文
     const fullPrompt = await composeFullPrompt(userId, content, searchSummary);
 
     // 詢問 LLM
-
     const result = await askLLM(fullPrompt, useModel);
     aiReply = result.response;
     useModel = result.usableModel;
@@ -190,7 +188,7 @@ export const slashAsk = async (interaction, content, selectedModel) => {
     ].filter(Boolean).join('\n');
 
     // 發送分段訊息
-    const chunks = splitDiscordMessage(interaction, formattedReply, MAX_DISCORD_REPLY_LENGTH);
+    const chunks = splitDiscordMessage(formattedReply, MAX_DISCORD_REPLY_LENGTH, userTag);
     if (chunks.length > 0) {
         await interaction.editReply(chunks[0]);
         for (let i = 1; i < chunks.length; i++) {
@@ -239,6 +237,32 @@ const askLLM = async (query, useModel) => {
     }
 }
 
+// 搜尋網路參考
+const searchGoogle = async (query) => {
+    const endpoint = 'https://www.googleapis.com/customsearch/v1';
+    const url = `${endpoint}?key=${process.env.GOOGLE_SEARCH_API_KEY}&cx=${process.env.GOOGLE_SEARCH_CSE_ID}&q=${encodeURIComponent(query)}`;
+
+    try {
+        const response = await fetch(url);
+        const data = await response.json();
+
+        if (!data.items || data.items.length === 0) {
+            return '找不到相關的搜尋結果。';
+        }
+
+        // 取前 3 筆結果
+        const summary = data.items.slice(0, 3).map((item, index) => {
+            return `${index + 1}. ${item.title}\n${item.snippet}`;
+        }).join('\n');
+
+        // 限制搜尋結果篇幅
+        return splitDiscordMessage(summary, MAX_SEARCH_SUMMARY_LENGTH)[0];
+    } catch (error) {
+        console.error('[ERROR]搜尋時發生錯誤：', error);
+        return '搜尋時發生錯誤，請稍後再試。';
+    }
+}
+
 // 組合完整 prompt
 const composeFullPrompt = async (userId, currentQuestion, searchSummary = "") => {
     const record = cloneRecord(memoryStore.get(userId));
@@ -256,7 +280,7 @@ const composeFullPrompt = async (userId, currentQuestion, searchSummary = "") =>
         preset && `前提：${preset}`,
         formattedSummary,
         formattedContext,
-        searchSummary ? `（以下為搜尋結果參考）\n${searchSummary}` : '',
+        searchSummary ? `（可根據下方搜尋結果作答，資訊不足請誠實回答，不提及「根據搜尋」等語句）\n${searchSummary}` : '',
         `使用者：${currentQuestion}`
     ].filter(Boolean).join("\n\n");
 
@@ -265,17 +289,17 @@ const composeFullPrompt = async (userId, currentQuestion, searchSummary = "") =>
 };
 
 // 摘要壓縮
-const compressTextWithLLM = async (text, targetTokens, useModel) => {
-    const prompt = `請將以下段落濃縮成不超過 ${targetTokens} token 的摘要，保留關鍵資訊與主要邏輯脈絡：\n\n${text}`;
+const compressTextWithLLM = async (content, targetTokens, useModel) => {
+    const prompt = `請將以下段落濃縮成不超過 ${targetTokens} token 的摘要，保留關鍵資訊與主要邏輯脈絡：\n\n${content}`;
     return (await askLLM(prompt, useModel)).response || '';
 };
 
 // 分段訊息
-const splitDiscordMessage = (interaction, text, maxLength) => {
+const splitDiscordMessage = (content, maxLength, userTag = null) => {
     // 字數沒過不用處理
-    if (text.length <= maxLength) return [text];
+    if (content.length <= maxLength) return [content];
 
-    const lines = text.split('\n');
+    const lines = content.split('\n');
     const chunks = [];
     let current = '';
 
@@ -292,7 +316,9 @@ const splitDiscordMessage = (interaction, text, maxLength) => {
     // 第二段以後加註段落標記
     if (chunks.length > 1) {
         return chunks.map((chunk, idx) =>
-            idx === 0 ? chunk : `\`(第 ${idx + 1} 段 / 共 ${chunks.length} 段)\` - ${interaction.user.tag}\n${chunk}`
+            idx === 0
+                ? chunk
+                : `\`(第 ${idx + 1} 段 / 共 ${chunks.length} 段)\`${userTag ? ` - ${userTag}` : ''}\n${chunk}`
         );
     }
     return chunks;

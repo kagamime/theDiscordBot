@@ -110,15 +110,32 @@ export const slashAsk = async (interaction, query, selectedModel) => {
     const userTag = interaction.user.tag;
     const record = cloneRecord(memoryStore.get(userId));
 
-    // 十分鐘未互動清空記憶
-    //// 之後改成進行主題檢查(新對話若超過十分鐘就讓LLM判斷主題跟前面記憶是否相同，不同則清空記憶)
+    // 互動後記下當前時間戳
     const now = Date.now();
-    record.lastInteraction = now;  // 互動後記下當前時間戳
+    record.lastInteraction = now;
+    memoryStore.set(userId, record);
+
+    // 逾時主題檢查
     const timeoutThreshold = CONTEXT_TIMEOUT_MINUTES * 60 * 1000;
-    if (now - record.lastInteraction > timeoutThreshold) {
-        record.context = [];
-        record.summary = "";
-        memoryStore.set(userId, record);
+    if (now - record.lastInteraction > timeoutThreshold && record.context.length > 0) {
+        // --- 逾時主題判斷 ---
+        const recentQuestions = record.context.slice(-3).map(item => `Q：${item.q}`).join('\n');
+        const topicCheckPrompt = `以下是使用者近期的提問：\n${recentQuestions}\n\n現在他問：「${query}」\n\n這是否為相似主題？請僅回答「是」或「否」。`;
+
+        try {
+            const topicCheckResult = await askLLM(topicCheckPrompt, useModel);
+            const isSameTopic = topicCheckResult.text.trim().startsWith("是");
+
+            if (!isSameTopic) {
+                record.context = [];
+                record.summary = "";
+                memoryStore.set(userId, record);
+                console.log(`[SET]${userTag}>主題變更，清除記憶：`);
+            }
+        } catch (err) {
+            console.warn(`[WARN]主題判斷失敗：${err.message}`);
+            // 為保險仍保留記憶
+        }
     }
 
     // 網路搜尋提供參考
@@ -143,8 +160,12 @@ export const slashAsk = async (interaction, query, selectedModel) => {
     if (useModel !== selectedModel) {
         fallbackNotice = `\`${MODEL_OPTIONS[selectedModel].name} 沒回應\``;
     }
-    const switchLog = useModel !== selectedModel ? ` -> \`${MODEL_OPTIONS[useModel].name}\`` : '';
-    console.log(`[REPLY]${userTag}> \`/ask\` ${content} - \`${MODEL_OPTIONS[selectedModel].name}\`${switchLog}`);
+    console.log(
+        `[REPLY]${userTag}> \`/ask\` ${content} - \`${MODEL_OPTIONS[selectedModel].name}\`` +
+        (useModel !== selectedModel
+            ? ` -> \`${MODEL_OPTIONS[useModel].name}\``
+            : '')
+    );
 
     // 儲存對話記憶並處理壓縮
     const newRound = { q: content, a: aiReply };
@@ -172,7 +193,7 @@ export const slashAsk = async (interaction, query, selectedModel) => {
             ...overflow.map(item => `使用者：${item.q}\n你：${item.a}`)
         ].filter(Boolean).join("\n\n");
 
-        const summaryResult = await compressTextWithLLM(mergedText, ANSWER_SUMMARY_TARGET_TOKENS.merge, useModel);
+        const summaryResult = await compressTextWithLLM(mergedText, COMPRESSION_TARGET_TOKENS.merge, useModel);
         record.summary = summaryResult;
     }
 
@@ -181,7 +202,7 @@ export const slashAsk = async (interaction, query, selectedModel) => {
 
     // 記錄並格式化回覆
     const formattedReply = [
-        `> ${content} - <@${userId}>`, // 原提問
+        `> ${searchSummary ? '🌐 ' : ''}${content} - <@${userId}>`, // 原提問
         aiReply,         // 模型的回應內容
         fallbackNotice,  // 沒有回應的模型提示
         aiReply && `\`by ${modelName}\`` // 模型名稱
@@ -224,7 +245,7 @@ const askLLM = async (query, useModel) => {
     }
 
     if (!answer) {
-        console.log(`[ERROR]模型皆無回應`);
+        console.error(`[ERROR]模型皆無回應`);
         return {
             response: null,
             usableModel: key,
@@ -284,7 +305,9 @@ const composeFullPrompt = async (userId, currentQuestion, searchSummary = "") =>
         `使用者：${currentQuestion}`
     ].filter(Boolean).join("\n\n");
 
-    console.log(`[DEBUG]組合上下文：\n${fullPrompt}`);  //// DEBUG檢查用
+    if (process.env.DEBUG_FULLPROMPT === "true") {
+        console.log(`[DEBUG]\`${userId}\`>組合上下文：\n${fullPrompt}`);
+    }
     return fullPrompt;
 };
 

@@ -1,14 +1,15 @@
 import fetch from 'node-fetch';  // 用於發送 HTTP 請求
 
-// 記憶體儲存：userId => { context: [{ q, a }], preset: string, lastInteraction: number }
+// 記憶體儲存：userId => { context: [{ q, a }], preset: string, summary: string, lastInteraction: number }
 const memoryStore = new Map();
 // 初始化 Map 結構
-const createDefaultRecord = () => ({
-    context: [],        // 最近對話記錄
-    preset: "",         // 對話前提
-    summary: "",        // 前情摘要
-    lastInteraction: 0  // 最後對話時間戳
+const cloneRecord = (src = {}) => ({
+    context: Array.isArray(src.context) ? [...src.context] : [],  // 最近對話記錄
+    preset: typeof src.preset === 'string' ? src.preset : '',     // 對話前提
+    summary: typeof src.summary === 'string' ? src.summary : '',  // 前情摘要
+    lastInteraction: typeof src.lastInteraction === 'number' ? src.lastInteraction : 0  // 最後對話時間戳
 });
+
 
 // 模型清單，鍵名作為 enum 選項值
 export const MODEL_OPTIONS = {
@@ -57,7 +58,7 @@ export const setAsk = async (interaction, content) => {
 
     const userId = interaction.user.id;
     const userTag = interaction.user.tag;
-    const record = memoryStore.get(userId) || createDefaultRecord();
+    const record = cloneRecord(memoryStore.get(userId));
 
     if (!content.trim()) {
         if (record.preset) {
@@ -109,9 +110,7 @@ export const slashAsk = async (interaction, content, selectedModel) => {
     let aiReply = '', modelName = '', fallbackNotice = '';
     const userId = interaction.user.id;
     const userTag = interaction.user.tag;
-    const record = memoryStore.get(userId) || createDefaultRecord();
-    //const record = { ...memoryStore.get(userId) } || createDefaultRecord(); //// 之後重新了解這樣做意義
-
+    const record = cloneRecord(memoryStore.get(userId));
 
     // 十分鐘未互動清空記憶
     //// 之後改成進行主題檢查(新對話若超過十分鐘就讓LLM判斷主題跟前面記憶是否相同，不同則清空記憶)
@@ -133,7 +132,7 @@ export const slashAsk = async (interaction, content, selectedModel) => {
     const fullPrompt = await composeFullPrompt(userId, content, searchSummary);
 
     // 詢問 LLM
-    
+
     const result = await askLLM(fullPrompt, useModel);
     aiReply = result.response;
     useModel = result.usableModel;
@@ -242,7 +241,7 @@ const askLLM = async (query, useModel) => {
 
 // 組合完整 prompt
 const composeFullPrompt = async (userId, currentQuestion, searchSummary = "") => {
-    const record = memoryStore.get(userId) || createDefaultRecord();
+    const record = cloneRecord(memoryStore.get(userId));
 
     const { preset, context, summary } = record;
 

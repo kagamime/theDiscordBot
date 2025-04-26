@@ -1,5 +1,6 @@
-import { Client, GatewayIntentBits, REST, Routes } from "discord.js";
-import { slashHelp, rollDice } from "./misc.js";
+import { Client, GatewayIntentBits, REST, Routes, EmbedBuilder } from "discord.js";
+import { slashHelp } from "./misc.js";
+import { theRollDice } from "./rolldice.js";
 import { theTimestamp } from "./timestamp.js";
 import { slashAsk, setAsk, clsAsk, MODEL_OPTIONS } from "./askHandler.js";
 import express from "express";
@@ -376,34 +377,27 @@ client.on("interactionCreate", async (interaction) => {
 
 // 監聽 Keywords
 client.on("messageCreate", async (message) => {
-    // !stopTheDiscordBot 後進入假眠
-    if (isStoppingBot) return;
-
-    // 忽略 Bot 自己的訊息
-    if (message.author.bot) return;
+    if (isStoppingBot) return;       // !stopTheDiscordBot 後進入假眠
+    if (message.author.bot) return;  // 忽略 Bot 自己的訊息
 
     const content = message.content;
 
-    // 處理符合關鍵字的命令
-    await Promise.all([
-        handleCommand(content, message, "!time", theTimestamp),
-        handleCommand(content, message, "!dice", rollDice)
-    ]);
+    if (shouldHandle(content, "!time")) {
+        const result = await theTimestamp(content);
+        await message.reply(result);
+        console.log(`[REPLY]${message.author.tag}> ${result}`);
+    }
+
+    if (shouldHandle(content, "!roll")) {
+        await theRollDice(content, message);
+    }
 });
 
-// 通用 keywords 回覆處理函式
-async function handleCommand(content, message, keyword, commandHandler) {
-    // 排除處理反引號包裹的指令
+// 判斷是否應該處理該指令
+function shouldHandle(content, keyword) {
     const regex = new RegExp(`\\\`[^\\\`]*${keyword}[^\\\`]*\\\``);
-    if (regex.test(content)) return;
-
-    if (content.includes(keyword)) {
-        const result = commandHandler(content);
-        if (result) {
-            await message.reply(result);
-            console.log(`[REPLY]${message.author.tag}> ${result}`);
-        }
-    }
+    if (regex.test(content)) return false; // 在 `內包住，不處理
+    return content.includes(keyword);
 }
 //#endregion
 

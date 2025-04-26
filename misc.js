@@ -1,4 +1,5 @@
 import moment from "moment-timezone";
+import { EmbedBuilder } from "discord.js";
 
 // help
 export async function slashHelp(interaction) {
@@ -26,24 +27,4 @@ export async function slashHelp(interaction) {
 
     // 回應訊息並設置為僅使用者可見(ephemeral)
     await interaction.reply({ content: reply, flags: 64 });
-}
-
-// !diceXdY 擲 X 顆 Y 面骰
-export function rollDice(content) {
-    const regex = /!dice(\d+)d(\d+)/i;
-    const match = content.match(regex);
-    if (!match) return null;
-
-    const count = parseInt(match[1]) || 1; // 擲骰的數量
-    const sides = parseInt(match[2]) || 6; // 骰子的面數
-
-    // 擲出每顆骰子的結果
-    const rolls = Array.from({ length: count }, () =>
-        Math.floor(Math.random() * sides) + 1
-    );
-
-    // 計算總和
-    const total = rolls.reduce((a, b) => a + b, 0);
-
-    return content.replace(match[0], `\`[${rolls.join(",")}]=>(${total})\``);
 }

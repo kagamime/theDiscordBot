@@ -174,23 +174,43 @@ process.on('SIGTERM', async () => {
 });
 //#endregion
 
+//#region Slash Command
+
 // 定義 Slash 命令列表
 const theCommands = [
     {
+        name: "control",
+        description: "⚙️ 管理員控制面板",
+        default_member_permissions: "0",  // 預設所有人不可見
+        dm_permission: false,  // 非私訊
+        type: 1,  // 類型為 1，代表是常規命令
+        options: [
+            {
+                name: "option",
+                description: "管理設定",
+                type: 3,  // 文字類型
+                required: true,  // 必填欄位
+                autocomplete: true,  // 加入提示
+            },
+        ]
+    },
+    {
         name: "help",
         description: "サポちゃん的支援說明！！",
+        dm_permission: false,
     },
     {
         name: "ask",
         description: "提問！！ サポちゃん會想辦法回答！！",
-        type: 1,  // 類型為 1，代表是常規命令
+        dm_permission: false,
+        type: 1,
         options: [
             {
                 name: "提問",
                 description: "請直接輸入要詢問的內容；或選擇「設定對話前提」與「清除前提與記憶」功能",
-                type: 3,  // 文字類型
+                type: 3,
                 required: true,
-                autocomplete: true,  // 加入提示
+                autocomplete: true,
             },
             {
                 name: "追記",
@@ -213,44 +233,114 @@ client.on("interactionCreate", async (interaction) => {
         const focused = interaction.options.getFocused();
         const focusedOption = interaction.options.getFocused(true);
 
-        if (focusedOption.name === "提問") {
+        if (interaction.commandName === "control" && focusedOption.name === "option") {
             const choices = [
-                { name: "查詢或設定前提 → 可於後方追記欄輸入對話前提", value: "__setask__" },
-                { name: "清除前提與記憶", value: "__clsask__" },
+                {
+                    name: process.env.DEBUG_FULLPROMPT === "false" ? "開啟上下文 Debug Log" : "關閉上下文 Debug Log",
+                    value: "__fullpromptlog__"
+                },
+                {
+                    name: process.env.DEBUG_CRONJOB_CONNECT === "false" ? "開啟 Cron-Job 連線 Log" : "關閉 Cron-Job 連線 Log",
+                    value: "__cronjobconnectlog__"
+                },
+                { name: "終止執行 theDiscordBot", value: "__stopthediscordbot__" },
             ];
             const filtered = choices.filter(choice => choice.name.startsWith(focused));
             await interaction.respond(filtered);
             return;
         }
 
-        if (focusedOption.name === "追記") {
-            const query = interaction.options._hoistedOptions.find(opt => opt.name === "提問")?.value;
-            const isQuery = ["__setask__", "__clsask__"].includes(query);
-
-            // 不在提問選項內時才提供模型選項
-            if (!isQuery) {
-                const modelChoices = Object.entries(MODEL_OPTIONS)  // 定義在 askHandler.js 內
-                    .map(([key, value]) => ({
-                        name: `${value.name}：${value.description}`, // 顯示在選單上的文字
-                        value: key, // 實際傳到指令處理器的值
-                    }))
-                    .filter(choice => choice.name.toLowerCase().includes(focused.toLowerCase()));
-                await interaction.respond(modelChoices.slice(0, 25)); // Discord 限制最多 25 筆
-            } else {
-                await interaction.respond([]);
+        if (interaction.commandName === "ask") {
+            if (focusedOption.name === "提問") {
+                const choices = [
+                    { name: "查詢或設定前提 → 可於後方追記欄輸入對話前提", value: "__setask__" },
+                    { name: "清除前提與記憶", value: "__clsask__" },
+                ];
+                const filtered = choices.filter(choice => choice.name.startsWith(focused));
+                await interaction.respond(filtered);
+                return;
             }
-            return;
+
+            if (focusedOption.name === "追記") {
+                const query = interaction.options._hoistedOptions.find(opt => opt.name === "提問")?.value;
+                const isQuery = ["__setask__", "__clsask__"].includes(query);
+
+                // 不在提問選項內時才提供模型選項
+                if (!isQuery) {
+                    const modelChoices = Object.entries(MODEL_OPTIONS)  // 定義在 askHandler.js 內
+                        .map(([key, value]) => ({
+                            name: `${value.name}：${value.description}`, // 顯示在選單上的文字
+                            value: key, // 實際傳到指令處理器的值
+                        }))
+                        .filter(choice => choice.name.toLowerCase().includes(focused.toLowerCase()));
+                    await interaction.respond(modelChoices.slice(0, 25)); // Discord 限制最多 25 筆
+                } else {
+                    await interaction.respond([]);
+                }
+                return;
+            }
         }
+
         return;
     }
 
     // 不處理非指令互動
     if (!interaction.isCommand()) return;
 
+    // /control（僅限 admin）
+    if (interaction.commandName === "control") {
+        const adminRoleId = process.env.ADMIN_ROLE_ID;
+        const member = interaction.member;
+
+        if (!member || !member.roles.cache.has(adminRoleId)) {
+            await interaction.reply({ content: "❌ 你沒有使用此指令的權限。", flags: 64 });
+            return;
+        }
+
+        const option = interaction.options.getString("option");
+        switch (option) {
+            case "__fullpromptlog__":
+                // 切換顯示上下文 Debug Log
+                process.env.DEBUG_FULLPROMPT = process.env.DEBUG_FULLPROMPT === "true" ? "false" : "true";
+                await interaction.reply({
+                    content: process.env.DEBUG_FULLPROMPT === "true" ? "已開啟上下文 Debug Log" : "已關閉上下文 Debug Log",
+                    flags: 64,
+                });
+                console.info(`[INFO]${process.env.DEBUG_FULLPROMPT === "true" ? "已開啟上下文 Debug Log" : "已關閉上下文 Debug Log"}`);
+                break;
+            case "__cronjobconnectlog__":
+                // 切換顯示 Cron-Job 連線 Log
+                process.env.DEBUG_CRONJOB_CONNECT = process.env.DEBUG_CRONJOB_CONNECT === "true" ? "false" : "true";
+                await interaction.reply({
+                    content: process.env.DEBUG_CRONJOB_CONNECT === "true" ? "已開啟 Cron-Job 連線 Log" : "已關閉 Cron-Job 連線 Log",
+                    flags: 64,
+                });
+                console.info(`[INFO]${process.env.DEBUG_CRONJOB_CONNECT === "true" ? "已開啟 Cron-Job 連線 Log" : "已關閉 Cron-Job 連線 Log"}`);
+                break;
+            case "__stopthediscordbot__":
+                isStoppingBot = 'true';
+                await interaction.reply({ content: "おやすみなさい．．．", flags: 64, });
+                console.info("[INFO]🔴 theDiscordBot 停止中...");
+                client.destroy(() => {
+                    console.info("[INFO]Discord 已離線");
+                }); // 停止 Discord Bot
+                break;
+            default:
+                await interaction.reply({
+                    content: "❌ 無效的選項。",
+                    flags: 64,
+                });
+                break;
+        }
+
+        return;
+    }
+
     // /help
     if (interaction.commandName === "help") {
         console.log(`[REPLY]${interaction.user.tag}> 觸發了 /help`);
         await slashHelp(interaction);
+        return;
     }
 
     // /ask
@@ -280,6 +370,9 @@ client.on("interactionCreate", async (interaction) => {
         return;
     }
 });
+//#endregion
+
+//#region !Keywords
 
 // 監聽 Keywords
 client.on("messageCreate", async (message) => {
@@ -290,19 +383,6 @@ client.on("messageCreate", async (message) => {
     if (message.author.bot) return;
 
     const content = message.content;
-
-    // 捕獲中止命令 !stopTheDiscordBot
-    if (content.includes("!stopTheDiscordBot") && message.member.roles.cache.has(process.env.ADMIN_ROLE_ID)) {
-        isStoppingBot = 'true';
-        console.info("[INFO]執行 !stopTheDiscordBot");
-        await message.reply("おやすみなさい。");
-        console.info("[INFO]🔴 theDiscordBot 停止中...");
-        client.destroy(() => {
-            console.info("[INFO]Discord 已離線");
-        }); // 停止 Discord Bot
-
-        return; // 不用 process.exit(0) 會被render重啟
-    }
 
     // 處理符合關鍵字的命令
     await Promise.all([
@@ -325,5 +405,6 @@ async function handleCommand(content, message, keyword, commandHandler) {
         }
     }
 }
+//#endregion
 
 client.login(process.env.DISCORD_TOKEN);

@@ -1,15 +1,23 @@
 import fetch from 'node-fetch';  // 用於發送 HTTP 請求
 
-// 記憶體儲存：userId => { context: [{ q, a }], preset: string, summary: string, lastInteraction: number }
-const memoryStore = new Map();
+//#region 環境初始化
+
+// 使用者記憶
+const userMemory = new Map();
+// 臨時群組記憶
+const groupMemory = new Map();
 // 初始化 Map 結構
 const cloneRecord = (src = {}) => ({
+    participants: src.participants instanceof Set ? new Set(src.participants) : new Set(),  // 參與者清單
     context: Array.isArray(src.context) ? [...src.context] : [],  // 最近對話記錄
     preset: typeof src.preset === 'string' ? src.preset : '',     // 對話前提
     summary: typeof src.summary === 'string' ? src.summary : '',  // 前情摘要
     lastInteraction: typeof src.lastInteraction === 'number' ? src.lastInteraction : 0  // 最後對話時間戳
 });
 
+// 使用者對應群組Map
+//const userToGroup = new Map< userId, groupId >();
+const userToGroup = new Map();
 
 // 模型清單，鍵名作為 enum 選項值
 export const MODEL_OPTIONS = {
@@ -51,20 +59,187 @@ const COMPRESSION_TARGET_TOKENS = {      // 上下文壓縮率(token)
 if (SUMMARY_ROUND_COUNT >= MAX_CONTEXT_ROUND) {
     throw new Error(`[ERROR]SUMMARY_ROUND_COUNT (${SUMMARY_ROUND_COUNT}) 必須小於 MAX_CONTEXT_ROUND (${MAX_CONTEXT_ROUND})`);
 }
+//#endregion
+
+//#region class MemoryManager 記憶管理
+class MemoryManager {
+    constructor() {
+        this.messageOwner = new Map(); // messageId -> userId (對話訊息擁有者)
+        this.userMemory = new Map();   // userId -> record
+        this.groupMemory = new Map();  // groupId -> record
+        this.groupCounter = 1;         // 流水號給新的 groupId
+    }
+
+    // 初始化記憶模板
+    cloneRecord(src = {}) {
+        return {
+            participants: src.participants instanceof Set ? new Set(src.participants) : new Set(),  // 參與者清單
+            context: Array.isArray(src.context) ? [...src.context] : [],                            // 最近對話記錄
+            preset: typeof src.preset === 'string' ? src.preset : '',                               // 對話前提
+            summary: typeof src.summary === 'string' ? src.summary : '',                            // 前情摘要
+            lastInteraction: typeof src.lastInteraction === 'number' ? src.lastInteraction : 0      // 最後對話時間戳
+        };
+    }
+
+    // 取得使用者的 preset
+    getUserPreset(userId) {
+        const userRecord = this.userMemory.get(userId) ?? this.cloneRecord();
+        return userRecord.preset;
+    }
+
+    // 取得 user 所屬 groupId
+    getUserGroupId(userId) {
+        const record = this.userMemory.get(userId);
+        return record && record.participants.size > 0 ? [...record.participants][0] : null;
+    }
+
+    // 取得目前的記憶體 (group/user)
+    getMemory(userId) {
+        const groupId = this.getUserGroupId(userId);
+        if (groupId && this.groupMemory.has(groupId)) {
+            return this.groupMemory.get(groupId);
+        } else {
+            return this.userMemory.get(userId) ?? this.cloneRecord();
+        }
+    }
+
+    // 更新記憶體
+    setMemory(userId, updatedRecord) {
+        // 單獨更新 preset
+        if (updatedRecord.preset) {
+            this.userMemory.set(userId, updatedRecord);
+            return;
+        }
+
+        const groupId = this.getUserGroupId(userId);
+        if (groupId && this.groupMemory.has(groupId)) {
+            // 取得現有的群組記錄，保證 participants 不被覆寫
+            updatedRecord.participants = this.groupMemory.get(groupId).participants;
+            updatedRecord.lastInteraction = Date.now();
+            this.groupMemory.set(groupId, updatedRecord);
+        } else {
+            // 如果沒有群組，直接存入使用者記憶體，保證 participants 不被覆寫
+            const currentUserRecord = this.userMemory.get(userId);
+            updatedRecord.participants = currentUserRecord ? currentUserRecord.participants : this.cloneRecord().participants;
+            updatedRecord.lastInteraction = Date.now();
+            this.userMemory.set(userId, updatedRecord);
+        }
+    }
+
+    // 將 user 加入指定 group，或創建新 group
+    addUserToGroup(userId, groupId = null) {
+        // 群組初始化檢查
+        if (this.getUserGroupId(userId) === groupId) return;
+        this.removeUserFromGroup(userId);
+        let isNewGroup = false;
+        if (!groupId) {
+            groupId = `group_${this.groupCounter++}`;
+            this.groupMemory.set(groupId, this.cloneRecord());
+            isNewGroup = true;
+        }
+
+        // 取得或初始化 group/user 記錄
+        const groupRecord = this.groupMemory.get(groupId) ?? this.cloneRecord();
+        const userRecord = this.userMemory.get(userId) ?? this.cloneRecord();
+
+        // 更新 participants
+        groupRecord.participants.add(userId);
+        userRecord.participants = new Set([groupId]);
+
+        // 移轉與處理使用者記憶 (除了 participants,preset)
+        if (isNewGroup) {
+            Object.assign(groupRecord, {
+                context: [...userRecord.context],
+                summary: userRecord.summary,
+                lastInteraction: Date.now()
+            });
+        }
+        Object.assign(userRecord, {
+            context: this.cloneRecord().context,
+            summary: this.cloneRecord().summary,
+            lastInteraction: this.cloneRecord().lastInteraction
+        });
+
+        // 更新資料
+        this.groupMemory.set(groupId, groupRecord);
+        this.userMemory.set(userId, userRecord);
+    }
+
+    // 把 user 移出 group
+    removeUserFromGroup(userId) {
+        const groupId = this.getUserGroupId(userId);
+        if (!groupId) return;
+
+        const groupRecord = this.groupMemory.get(groupId);
+        if (groupRecord) {
+            groupRecord.participants.delete(userId);
+            if (groupRecord.participants.size === 0) {
+                this.groupMemory.delete(groupId);
+            } else {
+                this.groupMemory.set(groupId, groupRecord);
+            }
+        }
+
+        // 初始化使用者資料
+        const userRecord = this.userMemory.get(userId) ?? this.cloneRecord();
+        userRecord.participants = this.cloneRecord().participants;
+        this.userMemory.set(userId, userRecord);
+    }
+
+    // 儲存新的對話記錄
+    saveContext(userId, qaPair) {
+        const groupId = this.getUserGroupId(userId);
+        if (groupId && this.groupMemory.has(groupId)) {
+            const groupRecord = this.groupMemory.get(groupId);
+            groupRecord.context.push(qaPair);
+            groupRecord.lastInteraction = Date.now();
+            this.groupMemory.set(groupId, groupRecord);
+        } else {
+            const userRecord = this.userMemory.get(userId) ?? this.cloneRecord();
+            userRecord.context.push(qaPair);
+            userRecord.lastInteraction = Date.now();
+            this.userMemory.set(userId, userRecord);
+        }
+    }
+
+    // 記錄對話訊息擁有者
+    setMessageOwner(messageId, userId) {
+        this.messageOwner.set(messageId, userId);
+
+        // 超過最大筆數，自動刪掉最舊的
+        if (messageOwner.size > 100) {
+            const firstKey = this.messageOwner.keys().next().value;
+            this.messageOwner.delete(firstKey);
+        }
+    }
+
+    // 取得對話訊息的擁有者
+    getMessageOwner(messageId) {
+        return this.messageOwner.get(messageId);
+    }//// 取得的owner有點問題要想一下
+
+    // 刪除對話訊息的擁有者記錄
+    removeMessageOwner(messageId) {
+        this.messageOwner.delete(messageId);
+    }
+}
+const memoryManager = new MemoryManager();
+//#endregion
+
+//#region 主函式
 
 // ASK 設定對話前提
 export const setAsk = async (interaction, content) => {
     await interaction.deferReply();  // 告知 Discord 延遲回應
-
     const userId = interaction.user.id;
     const userTag = interaction.user.tag;
-    const record = cloneRecord(memoryStore.get(userId));
+    const preset = memoryManager.getUserPreset(userId);
 
     if (!content.trim()) {
-        if (record.preset) {
-            console.log(`[SET]${userTag}>查詢前提：${record.preset}`);
+        if (preset) {
+            console.log(`[SET]${userTag}>查詢前提：${preset}`);
             await interaction.editReply({
-                content: `\`目前的對話前提：\`\n>>> ${record.preset}`,
+                content: `\`目前的對話前提：\`\n>>> ${preset}`,
                 flags: 64,
             });
         } else {
@@ -78,12 +253,13 @@ export const setAsk = async (interaction, content) => {
     }
 
     // 有傳入內容，設定新的前提
-    record.preset = content.trim();
-    memoryStore.set(userId, record);
+    const userRecord = memoryManager.userMemory.get(userId) ?? memoryManager.cloneRecord();
+    userRecord.preset = content.trim();
+    memoryManager.setMemory(userId, userRecord);
 
-    console.log(`[SET]${userTag}>設定前提：${record.preset}`);
+    console.log(`[SET]${userTag}>設定前提：${preset}`);
     await interaction.editReply({
-        content: `\`已設定對話前提！！\`\n>>> ${record.preset}`,
+        content: `\`已設定對話前提！！\`\n>>> ${preset}`,
         flags: 64,
     });
 };
@@ -91,8 +267,8 @@ export const setAsk = async (interaction, content) => {
 // ASK 清除前提與對話記憶
 export const clsAsk = async (interaction) => {
     await interaction.deferReply({ flags: 64 });  // 告知 Discord 延遲回應，且回應為隱藏
-
-    memoryStore.delete(interaction.user.id);
+    memoryManager.removeUserFromGroup(interaction.user.id);
+    memoryManager.userMemory.delete(interaction.user.id);
     console.log(`[SET]${interaction.user.tag}>清除前提記憶`);
     await interaction.editReply(`\`已清除對話前提與記憶！！\``);
 };
@@ -108,16 +284,11 @@ export const slashAsk = async (interaction, query, selectedModel) => {
     let content = query;
     const userId = interaction.user.id;
     const userTag = interaction.user.tag;
-    const record = cloneRecord(memoryStore.get(userId));
-
-    // 互動後記下當前時間戳
-    const now = Date.now();
-    record.lastInteraction = now;
-    memoryStore.set(userId, record);
+    const record = memoryManager.getMemory(userId);
 
     // 逾時主題檢查
     const timeoutThreshold = CONTEXT_TIMEOUT_MINUTES * 60 * 1000;
-    if (now - record.lastInteraction > timeoutThreshold && record.context.length > 0) {
+    if (Date.now() - record.lastInteraction > timeoutThreshold && record.context.length > 0) {
         // --- 逾時主題判斷 ---
         const recentQuestions = record.context.slice(-3).map(item => `Q：${item.q}`).join('\n');
         const topicCheckPrompt = `以下是使用者近期的提問：\n${recentQuestions}\n\n現在他問：「${query}」\n\n這是否為相似主題？請僅回答「是」或「否」。`;
@@ -127,9 +298,10 @@ export const slashAsk = async (interaction, query, selectedModel) => {
             const isSameTopic = topicCheckResult.text.trim().startsWith("是");
 
             if (!isSameTopic) {
-                record.context = [];
-                record.summary = "";
-                memoryStore.set(userId, record);
+                memoryManager.removeUserFromGroup(userId);
+                record.context = memoryManager.cloneRecord().context;
+                record.summary = memoryManager.cloneRecord().summary;
+                memoryManager.setMemory(userId, record);
                 console.log(`[SET]${userTag}>主題變更，清除記憶：`);
             }
         } catch (err) {
@@ -183,7 +355,7 @@ export const slashAsk = async (interaction, query, selectedModel) => {
     }
 
     // 推入最新對話
-    record.context.push(newRound);
+    memoryManager.saveContext(userId, newRound);
 
     // 檢查對話輪數並前情摘要化
     if (record.context.length > MAX_CONTEXT_ROUND) {
@@ -198,7 +370,7 @@ export const slashAsk = async (interaction, query, selectedModel) => {
     }
 
     // 更新記憶
-    memoryStore.set(userId, record);
+    memoryManager.setMemory(userId, record);
 
     // 記錄並格式化回覆
     const formattedReply = [
@@ -217,6 +389,7 @@ export const slashAsk = async (interaction, query, selectedModel) => {
         }
     }
 };
+//#endregion
 
 // 遍歷可用模型並詢問 LLM
 const askLLM = async (query, useModel) => {
@@ -286,8 +459,7 @@ const searchGoogle = async (query) => {
 
 // 組合完整 prompt
 const composeFullPrompt = async (userId, currentQuestion, searchSummary = "") => {
-    const record = cloneRecord(memoryStore.get(userId));
-
+    const record = memoryManager.getMemory(userId);
     const { preset, context, summary } = record;
 
     const formattedSummary = summary ? `（以下為前情摘要供參考）\n${summary}` : "";

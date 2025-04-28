@@ -27,7 +27,7 @@ export const MODEL_OPTIONS = {
 };
 const modelKeys = Object.keys(MODEL_OPTIONS);
 
-const MAX_DISCORD_REPLY_LENGTH = 1950;  // Discord 單則訊息的字數上限
+const MAX_DISCORD_REPLY_LENGTH = 1800;  // Discord 單則訊息的字數上限
 const MAX_SEARCH_SUMMARY_LENGTH = 700;  // 網路搜尋結果的字數上限
 const CONTEXT_TIMEOUT_MINUTES = 10;      // 時限內未互動，進行主題檢查
 const MAX_CONTEXT_ROUND = 5;             // 對話記憶上限
@@ -55,9 +55,9 @@ class MemoryManager {
     cloneRecord(src = {}) {
         return {
             participants: src.participants instanceof Set ? new Set(src.participants) : new Set(),  // 參與者清單
-            context: Array.isArray(src.context) ? [...src.context] : [],                            // 最近對話記錄
             preset: typeof src.preset === 'string' ? src.preset : '',                               // 對話前提
             summary: typeof src.summary === 'string' ? src.summary : '',                            // 前情摘要
+            context: Array.isArray(src.context) ? [...src.context] : [],                            // 最近對話記錄
             lastInteraction: typeof src.lastInteraction === 'number' ? src.lastInteraction : 0      // 最後對話時間戳
         };
     }
@@ -66,6 +66,13 @@ class MemoryManager {
     getUserPreset(userId) {
         const userRecord = this.userMemory.get(userId) ?? this.cloneRecord();
         return userRecord.preset;
+    }
+
+    // 更新使用者的 preset
+    setUserPreset(userId, preset) {
+        const userRecord = this.userMemory.get(userId) ?? this.cloneRecord();
+        userRecord.preset = preset;
+        this.userMemory.set(userId, userRecord);
     }
 
     // 取得 user 所屬 groupId
@@ -86,28 +93,27 @@ class MemoryManager {
 
     // 更新記憶體
     setMemory(userId, updatedRecord) {
-        // 單獨更新 preset
-        if (updatedRecord.preset) {
-            this.userMemory.set(userId, updatedRecord);
-            return;
-        }
-
         const groupId = this.getUserGroupId(userId);
         if (groupId && this.groupMemory.has(groupId)) {
-            // 取得現有的群組記錄，保證 participants 不被覆寫
-            updatedRecord.participants = this.groupMemory.get(groupId).participants;
-            updatedRecord.lastInteraction = Date.now();
+            // 取得現有的群組記錄，保證 participants/preset 不被覆寫
+            Object.assign(updatedRecord, {
+                participants: this.groupMemory.get(groupId).participants,
+                preset: this.cloneRecord().preset,
+                lastInteraction: Date.now()
+            });
             this.groupMemory.set(groupId, updatedRecord);
         } else {
             // 如果沒有群組，直接存入使用者記憶體，保證 participants 不被覆寫
-            const currentUserRecord = this.userMemory.get(userId);
-            updatedRecord.participants = currentUserRecord ? currentUserRecord.participants : this.cloneRecord().participants;
-            updatedRecord.lastInteraction = Date.now();
+            const currentUserRecord = this.userMemory.get(userId) ?? this.cloneRecord();
+            Object.assign(updatedRecord, {
+                participants: currentUserRecord ? currentUserRecord.participants : this.cloneRecord().participants,
+                lastInteraction: Date.now()
+            });
             this.userMemory.set(userId, updatedRecord);
         }
     }
 
-    // 將 user 加入指定 group，或創建新 group
+    // 將 user 加入指定 group，或建立新 group
     addUserToGroup(userId, groupId = null) {
         // 群組初始化檢查
         if (this.getUserGroupId(userId) === groupId) return;
@@ -167,41 +173,28 @@ class MemoryManager {
         this.userMemory.set(userId, userRecord);
     }
 
-    // 儲存新的對話記錄
-    saveContext(userId, qaPair) {
-        const groupId = this.getUserGroupId(userId);
-        if (groupId && this.groupMemory.has(groupId)) {
-            const groupRecord = this.groupMemory.get(groupId);
-            groupRecord.context.push(qaPair);
-            groupRecord.lastInteraction = Date.now();
-            this.groupMemory.set(groupId, groupRecord);
-        } else {
-            const userRecord = this.userMemory.get(userId) ?? this.cloneRecord();
-            userRecord.context.push(qaPair);
-            userRecord.lastInteraction = Date.now();
-            this.userMemory.set(userId, userRecord);
+    // 取得對話訊息的擁有者
+    getMessageOwner(messageId) {
+        if (!this.messageOwner) {
+            console.error(`[ERROR]messageOwner未建立`);
+            return null;
         }
+        if (!this.messageOwner.has(messageId)) {
+            console.warn(`[WARN]找不到訊息ID: ${messageId} 擁有者`);
+            return "none";
+        }
+        return this.messageOwner.get(messageId);
     }
 
-    // 記錄對話訊息擁有者
+    // 更新對話訊息擁有者
     setMessageOwner(messageId, userId) {
         this.messageOwner.set(messageId, userId);
 
         // 超過最大筆數，自動刪掉最舊的
-        if (messageOwner.size > 100) {
+        if (this.messageOwner.size > 100) {
             const firstKey = this.messageOwner.keys().next().value;
             this.messageOwner.delete(firstKey);
         }
-    }
-
-    // 取得對話訊息的擁有者
-    getMessageOwner(messageId) {
-        return this.messageOwner.get(messageId);
-    }
-
-    // 刪除對話訊息的擁有者記錄
-    removeMessageOwner(messageId) {
-        this.messageOwner.delete(messageId);
     }
 }
 const memoryManager = new MemoryManager();
@@ -214,17 +207,17 @@ export const setAsk = async (interaction, content) => {
     await interaction.deferReply();  // 告知 Discord 延遲回應
     const userId = interaction.user.id;
     const userTag = interaction.user.tag;
-    const preset = memoryManager.getUserPreset(userId);
+    let preset = memoryManager.getUserPreset(userId);
 
-    if (!content.trim()) {
+    if (!content || !content.trim()) {
         if (preset) {
-            console.log(`[SET]${userTag}>查詢前提：${preset}`);
+            console.info(`[GET]${userTag}>查詢前提：${preset}`);
             await interaction.editReply({
                 content: `\`目前的對話前提：\`\n>>> ${preset}`,
                 flags: 64,
             });
         } else {
-            console.log(`[SET]${userTag}>查詢前提：（尚未設定）`);
+            console.info(`[GET]${userTag}>查詢前提：（尚未設定）`);
             await interaction.editReply({
                 content: `\`目前還沒有對話前提！！\``,
                 flags: 64,
@@ -234,11 +227,9 @@ export const setAsk = async (interaction, content) => {
     }
 
     // 有傳入內容，設定新的前提
-    const userRecord = memoryManager.userMemory.get(userId) ?? memoryManager.cloneRecord();
-    userRecord.preset = content.trim();
-    memoryManager.setMemory(userId, userRecord);
-
-    console.log(`[SET]${userTag}>設定前提：${preset}`);
+    preset = content.trim();
+    memoryManager.setUserPreset(userId, preset);
+    console.info(`[SET]${userTag}>設定前提：${preset}`);
     await interaction.editReply({
         content: `\`已設定對話前提！！\`\n>>> ${preset}`,
         flags: 64,
@@ -250,7 +241,7 @@ export const clsAsk = async (interaction) => {
     await interaction.deferReply({ flags: 64 });  // 告知 Discord 延遲回應，且回應為隱藏
     memoryManager.removeUserFromGroup(interaction.user.id);
     memoryManager.userMemory.delete(interaction.user.id);
-    console.log(`[SET]${interaction.user.tag}>清除前提記憶`);
+    console.info(`[SET]${interaction.user.tag}>清除前提記憶`);
     await interaction.editReply(`\`已清除對話前提與記憶！！\``);
 };
 
@@ -283,7 +274,7 @@ export const slashAsk = async (interaction, query, selectedModel) => {
                 record.context = memoryManager.cloneRecord().context;
                 record.summary = memoryManager.cloneRecord().summary;
                 memoryManager.setMemory(userId, record);
-                console.log(`[SET]${userTag}>主題變更，清除記憶：`);
+                console.info(`[SET]${userTag}>主題變更，清除記憶：`);
             }
         } catch (err) {
             console.warn(`[WARN]主題判斷失敗：${err.message}`);
@@ -336,7 +327,7 @@ export const slashAsk = async (interaction, query, selectedModel) => {
     }
 
     // 推入最新對話
-    memoryManager.saveContext(userId, newRound);
+    record.context.push(newRound);
 
     // 檢查對話輪數並前情摘要化
     if (record.context.length > MAX_CONTEXT_ROUND) {
@@ -362,55 +353,69 @@ export const slashAsk = async (interaction, query, selectedModel) => {
     ].filter(Boolean).join('\n');
 
     // 發送分段訊息
-    const chunks = splitDiscordMessage(formattedReply, MAX_DISCORD_REPLY_LENGTH, userTag);
+    const chunks = splitDiscordMessage(formattedReply, MAX_DISCORD_REPLY_LENGTH, userId);
     if (chunks.length > 0) {
-        console.log("[DEBUG]MsgId:" + interaction.messageId); ////
         await interaction.editReply(chunks[0]);
-        // const sentMessage = await interaction.editReply(chunks[0]);
-        //memoryManager.setMessageOwner(sentMessage.id, userId);
-        console.log("[DEBUG]MsgId:" + sentMessage.id + "|" + interaction.messageId);
+        const currentEditReply = await interaction.fetchReply();
+        memoryManager.setMessageOwner(currentEditReply.id, userId);
+        console.log("////currentEditReply_msgid: " + currentEditReply.id);
         for (let i = 1; i < chunks.length; i++) {
-            await interaction.followUp(chunks[i]);
-            // const followUpMessage = await interaction.followUp(chunks[i]);
-            // memoryManager.setMessageOwner(followUpMessage.id, userId);
+            const currentFollowUp = await interaction.followUp(chunks[i]);
+            memoryManager.setMessageOwner(currentFollowUp.id, userId);
+            console.log("////currentFollowUp_msgid: " + currentFollowUp.id);
         }
     }
 };
 
-// 組合記憶並回覆給使用者
+// 調試記憶體內容
 export const replyMemory = async (interaction) => {
-    await interaction.deferReply();  // 告知 Discord 延遲回應
-    let fullContent = '調試記憶體內容：\n';
+    await interaction.deferReply({ flags: 64 });  // 告知 Discord 延遲回應，且回應為隱藏
+    let fullContent = '';
 
     // 遍歷所有使用者記憶
     memoryManager.userMemory.forEach((record, userId) => {
         fullContent += `
 __UserId__: ${userId}
 > Participants: ${Array.from(record.participants).join(', ') || ' -'}
-> Context: ${record.context.length > 0 ? JSON.stringify(record.context, null, 2) : ' -'}
+> Preset: ${record.preset || ' -'}
 > Summary: ${record.summary || ' -'}
-> Last Interaction: ${new Date(record.lastInteraction).toISOString() || ' -'}`
+> Context: ${record.context.length > 0 ? JSON.stringify(record.context, null, 2).split('\n').map(line => `> ${line}`).join('\n') : ' -'}
+> Last Interaction: ${record.lastInteraction || ' -'}`
     });
-    fullContent += '________________\n';
+    fullContent += '\n============\n';
     // 遍歷所有群組記憶
     memoryManager.groupMemory.forEach((groupRecord, groupId) => {
         fullContent += `
 __GroupId__: ${groupId}
 > Participants: ${Array.from(groupRecord.participants).join(', ') || ' -'}
-> Context: ${record.context.length > 0 ? JSON.stringify(record.context, null, 2) : ' -'}
 > Summary: ${groupRecord.summary || ' -'}
-> Last Interaction: ${new Date(groupRecord.lastInteraction).toISOString() || ' -'}`
+> Context: ${groupRecord.context.length > 0 ? JSON.stringify(groupRecord.context, null, 2).split('\n').map(line => `> ${line}`).join('\n') : ' -'}
+> Last Interaction: ${groupRecord.lastInteraction || ' -'}`
+    });
+    fullContent += '\n============\n';
+    // 遍歷最後十筆對話目錄
+    const last10 = Array.from(memoryManager.messageOwner.entries()).slice(-10); // 取最後10筆
+    last10.forEach(([messageId, userId]) => {
+        fullContent += `__MessageId__: ${messageId} | __UserId__: ${userId}\n`;
     });
 
     // 處理分段訊息
     const chunks = splitDiscordMessage(fullContent, MAX_DISCORD_REPLY_LENGTH);
     if (chunks.length > 0) {
-        await interaction.editReply({ content: chunks[0], flags: 64 });
+        await interaction.editReply(chunks[0]);
         for (let i = 1; i < chunks.length; i++) {
-            await interaction.followUp({ content: chunks[i], flags: 64 });
+            await interaction.followUp(chunks[i]);
         }
     }
 };
+
+// 加入或建立話題群組
+export const enterTopicGroup = async (message, messageId) => {
+    const userId = message.author.id;
+    const ownerId = memoryManager.getMessageOwner(messageId);
+    console.log("////Owner:" + ownerId);
+    ////檢查messageId所屬身分非自己，或非同群組    
+}
 //#endregion
 
 //#region 子函式
@@ -514,7 +519,7 @@ const compressTextWithLLM = async (content, targetTokens, useModel) => {
 };
 
 // 分段訊息
-const splitDiscordMessage = (content, maxLength, userTag = null) => {
+const splitDiscordMessage = (content, maxLength, userId = null) => {
     // 字數沒過不用處理
     if (content.length <= maxLength) return [content];
 
@@ -537,7 +542,7 @@ const splitDiscordMessage = (content, maxLength, userTag = null) => {
         return chunks.map((chunk, idx) =>
             idx === 0
                 ? chunk
-                : `\`(第 ${idx + 1} 段 / 共 ${chunks.length} 段)\`${userTag ? ` - ${userTag}` : ''}\n${chunk}`
+                : `\`(第 ${idx + 1} 段 / 共 ${chunks.length} 段)\`${userId ? ` - <@${userId}>` : ''}\n${chunk}`
         );
     }
     return chunks;

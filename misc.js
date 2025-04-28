@@ -1,5 +1,4 @@
 import moment from "moment-timezone";
-import { EmbedBuilder } from "discord.js";
 
 // help
 export async function slashHelp(interaction) {

@@ -1,5 +1,5 @@
-import { Client, GatewayIntentBits, REST, Routes, EmbedBuilder } from "discord.js";
-import { MODEL_OPTIONS, setAsk, clsAsk, slashAsk, replyMemory } from "./askHandler.js";
+import { Client, GatewayIntentBits, REST, Routes } from "discord.js";
+import { MODEL_OPTIONS, setAsk, clsAsk, slashAsk, replyMemory, enterTopicGroup } from "./askHandler.js";
 import { theTimestamp } from "./timestamp.js";
 import { theRollDice } from "./rolldice.js";
 import { slashHelp } from "./misc.js";
@@ -58,7 +58,7 @@ app.on('error', (error) => {
     console.error('[ERROR]Express 伺服器錯誤：', error);
 });
 client.on('error', (error) => {
-    ////console.error('[ERROR]Discord Client 發生錯誤：', error);
+    console.error('[ERROR]Discord Client 發生錯誤：', error);
 });
 
 // 重寫 console.log，使其同時發送到 Discord
@@ -238,6 +238,7 @@ client.on("interactionCreate", async (interaction) => {
 
         if (interaction.commandName === "control" && focusedOption.name === "options") {
             const choices = [
+                { name: "調試記憶體內容", value: "__replymemory__" },
                 {
                     name: process.env.DEBUG_CRONJOB_CONNECT === "false" ? "開啟 Cron-Job 連線 Log" : "關閉 Cron-Job 連線 Log",
                     value: "__cronjobconnectlog__"
@@ -246,7 +247,6 @@ client.on("interactionCreate", async (interaction) => {
                     name: process.env.DEBUG_FULLPROMPT === "false" ? "開啟上下文 Debug Log" : "關閉上下文 Debug Log",
                     value: "__fullpromptlog__"
                 },
-                { name: "調試記憶體內容", value: "__replymemory__" },
                 { name: "終止執行 theDiscordBot", value: "__stopthediscordbot__" },
             ];
             const filtered = choices.filter(choice => choice.name.startsWith(focused));
@@ -303,6 +303,10 @@ client.on("interactionCreate", async (interaction) => {
 
         const option = interaction.options.getString("options");
         switch (option) {
+            case "__replymemory__":
+                await replyMemory(interaction);
+                console.info(`[GET]${interaction.user.tag}> 調試記憶體內容`);
+                break;
             case "__cronjobconnectlog__":
                 // 切換顯示 Cron-Job 連線 Log
                 process.env.DEBUG_CRONJOB_CONNECT = process.env.DEBUG_CRONJOB_CONNECT === "true" ? "false" : "true";
@@ -310,7 +314,7 @@ client.on("interactionCreate", async (interaction) => {
                     content: process.env.DEBUG_CRONJOB_CONNECT === "true" ? "已開啟 Cron-Job 連線 Log" : "已關閉 Cron-Job 連線 Log",
                     flags: 64,
                 });
-                console.info(`[INFO]${process.env.DEBUG_CRONJOB_CONNECT === "true" ? "已開啟 Cron-Job 連線 Log" : "已關閉 Cron-Job 連線 Log"}`);
+                console.info(`[SET]${process.env.DEBUG_CRONJOB_CONNECT === "true" ? "已開啟 Cron-Job 連線 Log" : "已關閉 Cron-Job 連線 Log"}`);
                 break;
             case "__fullpromptlog__":
                 // 切換顯示上下文 Debug Log
@@ -319,17 +323,13 @@ client.on("interactionCreate", async (interaction) => {
                     content: process.env.DEBUG_FULLPROMPT === "true" ? "已開啟上下文 Debug Log" : "已關閉上下文 Debug Log",
                     flags: 64,
                 });
-                console.info(`[INFO]${process.env.DEBUG_FULLPROMPT === "true" ? "已開啟上下文 Debug Log" : "已關閉上下文 Debug Log"}`);
-                break;
-            case "__replymemory__":
-                await replyMemory(interaction);
-                console.info(`[INFO]${interaction.user.tag}> 調試記憶體內容`);
+                console.info(`[SET]${process.env.DEBUG_FULLPROMPT === "true" ? "已開啟上下文 Debug Log" : "已關閉上下文 Debug Log"}`);
                 break;
             case "__stopthediscordbot__":
                 isStoppingBot = 'true';
                 await interaction.reply({ content: "おやすみなさい．．．", flags: 64, });
                 console.info("[INFO]🔴 theDiscordBot 停止中...");
-                client.destroy(() => {
+                client.destroy(() => {  ////為何沒作用
                     console.info("[INFO]Discord 已離線");
                 }); // 停止 Discord Bot
                 break;
@@ -390,16 +390,16 @@ client.on("messageCreate", async (message) => {
     // 確認這是一個 reply 訊息
     if (message.reference && message.reference.messageId) {
         try {
-            // 取得被回覆的那則訊息
+            // 取得被回覆的那則訊息，確認被回覆的訊息是 bot 自己發的
             const repliedMessage = await message.channel.messages.fetch(message.reference.messageId);
-
-            // 確認被回覆的訊息是 bot 自己發的
             if (repliedMessage.author.id !== process.env.CLIENT_ID) {
                 return;
             }
 
-            // --- 通過驗證，可以進行後續動作 ---
-            console.log(`[DEBUG]${message.author.tag} 回覆了 bot 的訊息 ${repliedMessage.id}`);
+            // 加入或建立話題群組
+            enterTopicGroup(message, repliedMessage.id);
+
+            console.log(`[DEBUG]${message.author.tag} 回覆了 bot 的訊息 ${repliedMessage.id}`);////
         } catch (err) {
             console.error(`[ERROR]取得被回覆訊息時失敗：`, err);
         }

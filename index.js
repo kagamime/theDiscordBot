@@ -1,8 +1,8 @@
 import { Client, GatewayIntentBits, REST, Routes, EmbedBuilder } from "discord.js";
-import { slashHelp } from "./misc.js";
-import { theRollDice } from "./rolldice.js";
+import { MODEL_OPTIONS, setAsk, clsAsk, slashAsk, replyMemory } from "./askHandler.js";
 import { theTimestamp } from "./timestamp.js";
-import { slashAsk, setAsk, clsAsk, MODEL_OPTIONS } from "./askHandler.js";
+import { theRollDice } from "./rolldice.js";
+import { slashHelp } from "./misc.js";
 import express from "express";
 import dotenv from "dotenv";
 dotenv.config();
@@ -237,13 +237,14 @@ client.on("interactionCreate", async (interaction) => {
         if (interaction.commandName === "control" && focusedOption.name === "option") {
             const choices = [
                 {
-                    name: process.env.DEBUG_FULLPROMPT === "false" ? "開啟上下文 Debug Log" : "關閉上下文 Debug Log",
-                    value: "__fullpromptlog__"
-                },
-                {
                     name: process.env.DEBUG_CRONJOB_CONNECT === "false" ? "開啟 Cron-Job 連線 Log" : "關閉 Cron-Job 連線 Log",
                     value: "__cronjobconnectlog__"
                 },
+                {
+                    name: process.env.DEBUG_FULLPROMPT === "false" ? "開啟上下文 Debug Log" : "關閉上下文 Debug Log",
+                    value: "__fullpromptlog__"
+                },
+                { name: "調試記憶體內容", value: "__replymemory__" },
                 { name: "終止執行 theDiscordBot", value: "__stopthediscordbot__" },
             ];
             const filtered = choices.filter(choice => choice.name.startsWith(focused));
@@ -300,6 +301,15 @@ client.on("interactionCreate", async (interaction) => {
 
         const option = interaction.options.getString("option");
         switch (option) {
+            case "__cronjobconnectlog__":
+                // 切換顯示 Cron-Job 連線 Log
+                process.env.DEBUG_CRONJOB_CONNECT = process.env.DEBUG_CRONJOB_CONNECT === "true" ? "false" : "true";
+                await interaction.reply({
+                    content: process.env.DEBUG_CRONJOB_CONNECT === "true" ? "已開啟 Cron-Job 連線 Log" : "已關閉 Cron-Job 連線 Log",
+                    flags: 64,
+                });
+                console.info(`[INFO]${process.env.DEBUG_CRONJOB_CONNECT === "true" ? "已開啟 Cron-Job 連線 Log" : "已關閉 Cron-Job 連線 Log"}`);
+                break;
             case "__fullpromptlog__":
                 // 切換顯示上下文 Debug Log
                 process.env.DEBUG_FULLPROMPT = process.env.DEBUG_FULLPROMPT === "true" ? "false" : "true";
@@ -309,14 +319,9 @@ client.on("interactionCreate", async (interaction) => {
                 });
                 console.info(`[INFO]${process.env.DEBUG_FULLPROMPT === "true" ? "已開啟上下文 Debug Log" : "已關閉上下文 Debug Log"}`);
                 break;
-            case "__cronjobconnectlog__":
-                // 切換顯示 Cron-Job 連線 Log
-                process.env.DEBUG_CRONJOB_CONNECT = process.env.DEBUG_CRONJOB_CONNECT === "true" ? "false" : "true";
-                await interaction.reply({
-                    content: process.env.DEBUG_CRONJOB_CONNECT === "true" ? "已開啟 Cron-Job 連線 Log" : "已關閉 Cron-Job 連線 Log",
-                    flags: 64,
-                });
-                console.info(`[INFO]${process.env.DEBUG_CRONJOB_CONNECT === "true" ? "已開啟 Cron-Job 連線 Log" : "已關閉 Cron-Job 連線 Log"}`);
+            case "__replymemory__":
+                await replyMemory(interaction);
+                console.info(`[INFO]${interaction.user.tag}> 調試記憶體內容`);
                 break;
             case "__stopthediscordbot__":
                 isStoppingBot = 'true';

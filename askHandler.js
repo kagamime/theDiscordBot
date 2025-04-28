@@ -2,23 +2,6 @@ import fetch from 'node-fetch';  // 用於發送 HTTP 請求
 
 //#region 環境初始化
 
-// 使用者記憶
-const userMemory = new Map();
-// 臨時群組記憶
-const groupMemory = new Map();
-// 初始化 Map 結構
-const cloneRecord = (src = {}) => ({
-    participants: src.participants instanceof Set ? new Set(src.participants) : new Set(),  // 參與者清單
-    context: Array.isArray(src.context) ? [...src.context] : [],  // 最近對話記錄
-    preset: typeof src.preset === 'string' ? src.preset : '',     // 對話前提
-    summary: typeof src.summary === 'string' ? src.summary : '',  // 前情摘要
-    lastInteraction: typeof src.lastInteraction === 'number' ? src.lastInteraction : 0  // 最後對話時間戳
-});
-
-// 使用者對應群組Map
-//const userToGroup = new Map< userId, groupId >();
-const userToGroup = new Map();
-
 // 模型清單，鍵名作為 enum 選項值
 export const MODEL_OPTIONS = {
     gemini_2_0_flash: {
@@ -59,9 +42,7 @@ const COMPRESSION_TARGET_TOKENS = {      // 上下文壓縮率(token)
 if (SUMMARY_ROUND_COUNT >= MAX_CONTEXT_ROUND) {
     throw new Error(`[ERROR]SUMMARY_ROUND_COUNT (${SUMMARY_ROUND_COUNT}) 必須小於 MAX_CONTEXT_ROUND (${MAX_CONTEXT_ROUND})`);
 }
-//#endregion
 
-//#region class MemoryManager 記憶管理
 class MemoryManager {
     constructor() {
         this.messageOwner = new Map(); // messageId -> userId (對話訊息擁有者)
@@ -386,6 +367,40 @@ export const slashAsk = async (interaction, query, selectedModel) => {
         await interaction.editReply(chunks[0]);
         for (let i = 1; i < chunks.length; i++) {
             await interaction.followUp(chunks[i]);
+        }
+    }
+};
+
+// 組合記憶並回覆給使用者
+export const replyMemory = async (interaction) => {
+    let fullContent = '調試記憶體內容：\n';
+
+    // 遍歷所有使用者記憶
+    memoryManager.userMemory.forEach((record, userId) => {
+        fullContent += `
+__UserId__: ${userId}
+> Participants: ${Array.from(record.participants).join(', ') || ' -'}
+> Context: ${record.context.length > 0 ? JSON.stringify(record.context, null, 2) : ' -'}
+> Summary: ${record.summary || ' -'}
+> Last Interaction: ${new Date(record.lastInteraction).toISOString() || ' -'}`
+    });
+    fullContent += '________________\n';
+    // 遍歷所有群組記憶
+    memoryManager.groupMemory.forEach((groupRecord, groupId) => {
+        fullContent += `
+__GroupId__: ${groupId}
+> Participants: ${Array.from(groupRecord.participants).join(', ') || ' -'}
+> Context: ${record.context.length > 0 ? JSON.stringify(record.context, null, 2) : ' -'}
+> Summary: ${groupRecord.summary || ' -'}
+> Last Interaction: ${new Date(groupRecord.lastInteraction).toISOString() || ' -'}`
+    });
+
+    // 處理分段訊息
+    const chunks = splitDiscordMessage(fullContent, MAX_DISCORD_REPLY_LENGTH);
+    if (chunks.length > 0) {
+        await interaction.editReply({ content: chunks[0], flags: 64 });
+        for (let i = 1; i < chunks.length; i++) {
+            await interaction.followUp({ content: chunks[i], flags: 64 });
         }
     }
 };

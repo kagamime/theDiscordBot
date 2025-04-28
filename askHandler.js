@@ -364,15 +364,18 @@ export const slashAsk = async (interaction, query, selectedModel) => {
     // 發送分段訊息
     const chunks = splitDiscordMessage(formattedReply, MAX_DISCORD_REPLY_LENGTH, userTag);
     if (chunks.length > 0) {
-        await interaction.editReply(chunks[0]);
+        const sentMessage = await interaction.editReply(chunks[0]);
+        memoryManager.setMessageOwner(sentMessage.id, userId);
         for (let i = 1; i < chunks.length; i++) {
-            await interaction.followUp(chunks[i]);
+            const followUpMessage = await interaction.followUp(chunks[i]);
+            memoryManager.setMessageOwner(followUpMessage.id, userId);
         }
     }
 };
 
 // 組合記憶並回覆給使用者
 export const replyMemory = async (interaction) => {
+    await interaction.deferReply();  // 告知 Discord 延遲回應
     let fullContent = '調試記憶體內容：\n';
 
     // 遍歷所有使用者記憶
@@ -405,6 +408,8 @@ __GroupId__: ${groupId}
     }
 };
 //#endregion
+
+//#region 子函式
 
 // 遍歷可用模型並詢問 LLM
 const askLLM = async (query, useModel) => {
@@ -533,6 +538,7 @@ const splitDiscordMessage = (content, maxLength, userTag = null) => {
     }
     return chunks;
 };
+//#endregion
 
 //#region 模型實作
 

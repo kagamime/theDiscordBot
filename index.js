@@ -33,7 +33,9 @@ app.use((req, res, next) => {
 
     // 收到 cron-job 定時請求
     if (req.headers['the-cron-job'] === 'true') {
-        console.info(`[INFO]收到請求：${req.method} cron-job.org`);
+        if (process.env.DEBUG_CRONJOB_CONNECT === "true") {
+            console.info(`[INFO]收到請求：${req.method} cron-job.org`);
+        }
     } else {
         console.info(`[INFO]收到請求：${req.method} ${req.originalUrl}`);
     }
@@ -187,7 +189,7 @@ const theCommands = [
         type: 1,  // 類型為 1，代表是常規命令
         options: [
             {
-                name: "option",
+                name: "options",
                 description: "管理設定",
                 type: 3,  // 文字類型
                 required: true,  // 必填欄位
@@ -234,7 +236,7 @@ client.on("interactionCreate", async (interaction) => {
         const focused = interaction.options.getFocused();
         const focusedOption = interaction.options.getFocused(true);
 
-        if (interaction.commandName === "control" && focusedOption.name === "option") {
+        if (interaction.commandName === "control" && focusedOption.name === "options") {
             const choices = [
                 {
                     name: process.env.DEBUG_CRONJOB_CONNECT === "false" ? "開啟 Cron-Job 連線 Log" : "關閉 Cron-Job 連線 Log",
@@ -299,7 +301,7 @@ client.on("interactionCreate", async (interaction) => {
             return;
         }
 
-        const option = interaction.options.getString("option");
+        const option = interaction.options.getString("options");
         switch (option) {
             case "__cronjobconnectlog__":
                 // 切換顯示 Cron-Job 連線 Log
@@ -384,6 +386,24 @@ client.on("interactionCreate", async (interaction) => {
 client.on("messageCreate", async (message) => {
     if (isStoppingBot) return;       // !stopTheDiscordBot 後進入假眠
     if (message.author.bot) return;  // 忽略 Bot 自己的訊息
+
+    // 確認這是一個 reply 訊息
+    if (message.reference && message.reference.messageId) {
+        try {
+            // 取得被回覆的那則訊息
+            const repliedMessage = await message.channel.messages.fetch(message.reference.messageId);
+
+            // 確認被回覆的訊息是 bot 自己發的
+            if (repliedMessage.author.id !== process.env.CLIENT_ID) {
+                return;
+            }
+
+            // --- 通過驗證，可以進行後續動作 ---
+            console.log(`[DEBUG]${message.author.tag} 回覆了 bot 的訊息 ${repliedMessage.id}`);
+        } catch (err) {
+            console.error(`[ERROR]取得被回覆訊息時失敗：`, err);
+        }
+    }
 
     const content = message.content;
 

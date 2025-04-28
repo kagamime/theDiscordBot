@@ -197,7 +197,7 @@ class MemoryManager {
     // 取得對話訊息的擁有者
     getMessageOwner(messageId) {
         return this.messageOwner.get(messageId);
-    }//// 取得的owner有點問題要想一下
+    }
 
     // 刪除對話訊息的擁有者記錄
     removeMessageOwner(messageId) {
@@ -364,11 +364,15 @@ export const slashAsk = async (interaction, query, selectedModel) => {
     // 發送分段訊息
     const chunks = splitDiscordMessage(formattedReply, MAX_DISCORD_REPLY_LENGTH, userTag);
     if (chunks.length > 0) {
-        const sentMessage = await interaction.editReply(chunks[0]);
-        memoryManager.setMessageOwner(sentMessage.id, userId);
+        console.log("[DEBUG]MsgId:" + interaction.messageId); ////
+        await interaction.editReply(chunks[0]);
+        // const sentMessage = await interaction.editReply(chunks[0]);
+        //memoryManager.setMessageOwner(sentMessage.id, userId);
+        console.log("[DEBUG]MsgId:" + sentMessage.id + "|" + interaction.messageId);
         for (let i = 1; i < chunks.length; i++) {
-            const followUpMessage = await interaction.followUp(chunks[i]);
-            memoryManager.setMessageOwner(followUpMessage.id, userId);
+            await interaction.followUp(chunks[i]);
+            // const followUpMessage = await interaction.followUp(chunks[i]);
+            // memoryManager.setMessageOwner(followUpMessage.id, userId);
         }
     }
 };

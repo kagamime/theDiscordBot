@@ -58,7 +58,7 @@ app.on('error', (error) => {
     console.error('[ERROR]Express 伺服器錯誤：', error);
 });
 client.on('error', (error) => {
-    console.error('[ERROR]Discord Client 發生錯誤：', error);
+    ////console.error('[ERROR]Discord Client 發生錯誤：', error);
 });
 
 // 重寫 console.log，使其同時發送到 Discord
@@ -406,6 +406,19 @@ client.on("messageCreate", async (message) => {
     }
 
     const content = message.content;
+
+    // 捕獲中止命令 !stopTheDiscordBot
+    if (content.includes("!stopTheDiscordBot") && message.member.roles.cache.has(process.env.ADMIN_ROLE_ID)) {
+        isStoppingBot = 'true';
+        console.info("[INFO]執行 !stopTheDiscordBot");
+        await message.reply("おやすみなさい。");
+        console.info("[INFO]🔴 theDiscordBot 停止中...");
+        client.destroy(() => {
+            console.info("[INFO]Discord 已離線");
+        }); // 停止 Discord Bot
+
+        return; // 不用 process.exit(0) 會被render重啟
+    }
 
     if (shouldHandle(content, "!time")) {
         const result = await theTimestamp(content);

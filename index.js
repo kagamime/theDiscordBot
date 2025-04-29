@@ -1,5 +1,5 @@
 import { Client, GatewayIntentBits, REST, Routes } from "discord.js";
-import { MODEL_OPTIONS, setAsk, clsAsk, slashAsk, replyMemory, enterTopicGroup } from "./askHandler.js";
+import { MODEL_OPTIONS, setAsk, clsAsk, slashAsk, replyAsk, replyMemory } from "./askHandler.js";
 import { theTimestamp } from "./timestamp.js";
 import { theRollDice } from "./rolldice.js";
 import { slashHelp } from "./misc.js";
@@ -58,7 +58,7 @@ app.on('error', (error) => {
     console.error('[ERROR]Express 伺服器錯誤：', error);
 });
 client.on('error', (error) => {
-    console.error('[ERROR]Discord Client 發生錯誤：', error);
+    console.error('[ERROR]Discord Client 發生錯誤：', error); ////send log 長度問題??
 });
 
 // 重寫 console.log，使其同時發送到 Discord
@@ -397,9 +397,9 @@ client.on("messageCreate", async (message) => {
             }
 
             // 加入或建立話題群組
-            enterTopicGroup(message, repliedMessage.id);
+            replyAsk(message, repliedMessage.id);
 
-            console.log(`[DEBUG]${message.author.tag} 回覆了 bot 的訊息 ${repliedMessage.id}`);////
+            console.info(`[INFO]]${message.author.tag}>reply bot 訊息: ${repliedMessage.id}`);
         } catch (err) {
             console.error(`[ERROR]取得被回覆訊息時失敗：`, err);
         }

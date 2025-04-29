@@ -77,12 +77,14 @@ class MemoryManager {
 
     // 取得 user 所屬 groupId
     getUserGroupId(userId) {
+        if (!userId) return null;
         const record = this.userMemory.get(userId);
         return record && record.participants.size > 0 ? [...record.participants][0] : null;
     }
 
     // 取得目前的記憶體 (group/user)
     getMemory(userId) {
+        if (!userId) return null;
         const groupId = this.getUserGroupId(userId);
         if (groupId && this.groupMemory.has(groupId)) {
             return this.groupMemory.get(groupId);
@@ -114,10 +116,11 @@ class MemoryManager {
     }
 
     // 將 user 加入指定 group，或建立新 group
-    addUserToGroup(userId, groupId = null) {
+    addUserToGroup(userId, groupId) {
         // 群組初始化檢查
-        if (this.getUserGroupId(userId) === groupId) return;
+        if (this.getUserGroupId(userId) === groupId && groupId != null) return;
         this.removeUserFromGroup(userId);
+
         let isNewGroup = false;
         if (!groupId) {
             groupId = `group_${this.groupCounter++}`;
@@ -150,6 +153,8 @@ class MemoryManager {
         // 更新資料
         this.groupMemory.set(groupId, groupRecord);
         this.userMemory.set(userId, userRecord);
+
+        return groupId;
     }
 
     // 把 user 移出 group
@@ -358,14 +363,33 @@ export const slashAsk = async (interaction, query, selectedModel) => {
         await interaction.editReply(chunks[0]);
         const currentEditReply = await interaction.fetchReply();
         memoryManager.setMessageOwner(currentEditReply.id, userId);
-        console.log("////currentEditReply_msgid: " + currentEditReply.id);
         for (let i = 1; i < chunks.length; i++) {
             const currentFollowUp = await interaction.followUp(chunks[i]);
             memoryManager.setMessageOwner(currentFollowUp.id, userId);
-            console.log("////currentFollowUp_msgid: " + currentFollowUp.id);
         }
     }
 };
+
+// ASK 加入或建立話題群組
+export const replyAsk = async (message, messageId) => {
+    const userId = message.author.id;
+    const ownerId = memoryManager.getMessageOwner(messageId);
+    const ownerGroup = memoryManager.getUserGroupId(ownerId);
+    const content = message.content;
+
+    // 檢查ownerId存在、messageId所屬身分非自己，或非同群組    
+    if (!ownerId || ownerId === userId || (ownerGroup != null && ownerGroup === memoryManager.getUserGroupId(userId))) return;
+
+    // 加入或建立群組
+    if (ownerGroup) {
+        memoryManager.addUserToGroup(userId, ownerGroup);
+    } else {
+        memoryManager.addUserToGroup(userId, memoryManager.addUserToGroup(ownerId));
+    }
+
+    ////網路搜尋提供參考、組合上下文、詢問LLM...，注意方法從interaction換成message
+
+}
 
 // 調試記憶體內容
 export const replyMemory = async (interaction) => {
@@ -396,7 +420,7 @@ __GroupId__: ${groupId}
     // 遍歷最後十筆對話目錄
     const last10 = Array.from(memoryManager.messageOwner.entries()).slice(-10); // 取最後10筆
     last10.forEach(([messageId, userId]) => {
-        fullContent += `__MessageId__: ${messageId} | __UserId__: ${userId}\n`;
+        fullContent += `__MessageId__: \`${messageId}\` | __UserId__: \`${userId}\`\n`;
     });
 
     // 處理分段訊息
@@ -408,14 +432,6 @@ __GroupId__: ${groupId}
         }
     }
 };
-
-// 加入或建立話題群組
-export const enterTopicGroup = async (message, messageId) => {
-    const userId = message.author.id;
-    const ownerId = memoryManager.getMessageOwner(messageId);
-    console.log("////Owner:" + ownerId);
-    ////檢查messageId所屬身分非自己，或非同群組    
-}
 //#endregion
 
 //#region 子函式

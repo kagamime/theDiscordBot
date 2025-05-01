@@ -6,22 +6,22 @@ import fetch from 'node-fetch';  // 用於發送 HTTP 請求
 export const MODEL_OPTIONS = {
     gemini_2_0_flash: {
         name: 'gemini-2.0-flash',
-        description: "低延遲的模型，適合快速回答。",
+        description: "低延遲的模型，適合快速回答，訓練資料截至 2023 年初。",
         handler: askGemini,
     },
     gemini_2_0_pro_exp: {
         name: 'gemini-2.0-pro-exp',
-        description: "高品質回應模型，適合深度對話。",
+        description: "高品質回應模型，適合深度對話，訓練資料截至 2023 年初。",
         handler: askGemini,
     },
     openchat_3_5_turbo: {
-        name: 'openchat/gpt-3.5-turbo',
+        name: 'openai/gpt-3.5-turbo',
         description: "輕量優化版 ChatGPT，訓練資料截至 2021 年。",
         handler: askOpenrouter,
     },
-    openchat_3_5: {
-        name: 'openchat/openchat-3.5-0106',
-        description: "標準版 ChatGPT，訓練資料截至 2021 年。",
+    openchat_7b: {
+        name: 'openchat/openchat-7b',
+        description: "OpenChat 7B（免費版），相當於基礎 GPT-3.5，訓練資料截至 2023 年中。",
         handler: askOpenrouter,
     },
 };
@@ -37,6 +37,7 @@ const COMPRESSION_TARGET_TOKENS = {      // 上下文壓縮率(token)
     threshold: 200,  // 第 2 輪對話後壓縮率
     merge: 450,      // 前情摘要篇幅
 };
+let useModel = null;  // 記錄當前可用 model
 
 // 常數相依性檢查
 if (SUMMARY_ROUND_COUNT >= MAX_CONTEXT_ROUND) {
@@ -160,7 +161,7 @@ class MemoryManager {
     // 把 user 移出 group
     removeUserFromGroup(userId) {
         const groupId = this.getUserGroupId(userId);
-        if (!groupId) return;
+        if (!groupId) return null;
 
         const groupRecord = this.groupMemory.get(groupId);
         if (groupRecord) {
@@ -176,6 +177,7 @@ class MemoryManager {
         const userRecord = this.userMemory.get(userId) ?? this.cloneRecord();
         userRecord.participants = this.cloneRecord().participants;
         this.userMemory.set(userId, userRecord);
+        return 'removed';
     }
 
     // 取得對話訊息的擁有者
@@ -201,6 +203,35 @@ class MemoryManager {
             this.messageOwner.delete(firstKey);
         }
     }
+
+    // 移除或轉移對話所有權
+    removeMessageOwner(userId) {
+        const groupId = this.getUserGroupId(userId);
+        const groupRecord = groupId ? this.getGroupRecord(groupId) : null;
+
+        // 如果使用者有群組且群組內有其他成員
+        if (groupRecord && groupRecord.participants.size > 2) {
+            // 遍歷訊息並轉移所有權
+            for (let [msgId, ownerId] of this.messageOwner) {
+                if (ownerId === userId) {
+                    for (let participant of groupRecord.participants) {
+                        if (participant !== userId) {
+                            this.messageOwner.set(msgId, participant); // 轉移所有權
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        // 移除 userId 的所有訊息所有權
+        for (let [msgId, ownerId] of this.messageOwner) {
+            if (ownerId === userId) {
+                this.messageOwner.delete(msgId);  // 刪除該 msgId
+            }
+        }
+    }
+
 }
 const memoryManager = new MemoryManager();
 //#endregion
@@ -255,7 +286,7 @@ export const slashAsk = async (interaction, query, selectedModel) => {
     await interaction.deferReply();  // 告知 Discord 延遲回應
 
     selectedModel = modelKeys.includes(selectedModel) ? selectedModel : modelKeys[0];  // 檢查輸入選項合法性
-    let useModel = selectedModel;
+    useModel = selectedModel;
 
     let aiReply = '', modelName = '', fallbackNotice = '', searchSummary = '';
     let content = query;
@@ -272,13 +303,16 @@ export const slashAsk = async (interaction, query, selectedModel) => {
 
         try {
             const topicCheckResult = await askLLM(topicCheckPrompt, useModel);
-            const isSameTopic = topicCheckResult.text.trim().startsWith("是");
+            const isSameTopic = topicCheckResult?.trim().startsWith("是");
 
             if (!isSameTopic) {
-                memoryManager.removeUserFromGroup(userId);
-                record.context = memoryManager.cloneRecord().context;
-                record.summary = memoryManager.cloneRecord().summary;
-                memoryManager.setMemory(userId, record);
+                memoryManager.removeMessageOwner(userId);
+
+                if (!memoryManager.removeUserFromGroup(userId)) {
+                    record.context = memoryManager.cloneRecord().context;
+                    record.summary = memoryManager.cloneRecord().summary;
+                    memoryManager.setMemory(userId, record);
+                }
                 console.info(`[SET]${userTag}>主題變更，清除記憶：`);
             }
         } catch (err) {
@@ -297,9 +331,7 @@ export const slashAsk = async (interaction, query, selectedModel) => {
     const fullPrompt = await composeFullPrompt(userId, content, searchSummary);
 
     // 詢問 LLM
-    const result = await askLLM(fullPrompt, useModel);
-    aiReply = result.response;
-    useModel = result.usableModel;
+    aiReply = await askLLM(fullPrompt, useModel);
     modelName = MODEL_OPTIONS[useModel].name;
 
     if (!aiReply) {
@@ -351,10 +383,10 @@ export const slashAsk = async (interaction, query, selectedModel) => {
 
     // 記錄並格式化回覆
     const formattedReply = [
-        `> ${searchSummary ? '🌐 ' : ''}${content} - <@${userId}>`, // 原提問
+        `> ${searchSummary ? '🌐 ' : ''}${content} - <@${userId}>`,  // 原提問
         aiReply,         // 模型的回應內容
         fallbackNotice,  // 沒有回應的模型提示
-        aiReply && `\`by ${modelName}\`` // 模型名稱
+        aiReply && `\`by ${modelName}\``  // 模型名稱
     ].filter(Boolean).join('\n');
 
     // 發送分段訊息
@@ -377,6 +409,9 @@ export const replyAsk = async (message, messageId) => {
     const ownerGroup = memoryManager.getUserGroupId(ownerId);
     const content = message.content;
 
+    let aiReply = '', modelName = '', searchSummary = '';
+    const record = memoryManager.getMemory(userId);
+
     // 檢查ownerId存在、messageId所屬身分非自己，或非同群組    
     if (!ownerId || ownerId === userId || (ownerGroup != null && ownerGroup === memoryManager.getUserGroupId(userId))) return;
 
@@ -387,8 +422,80 @@ export const replyAsk = async (message, messageId) => {
         memoryManager.addUserToGroup(userId, memoryManager.addUserToGroup(ownerId));
     }
 
-    ////網路搜尋提供參考、組合上下文、詢問LLM...，注意方法從interaction換成message
+    // 回覆思考動畫
+    const dots = ['。', '。。', '。。。'];
+    let dotIndex = 0;
+    let running = true;
+    const sentMessage = await message.reply("。。。");
+    const intervalId = setInterval(() => {
+        if (!running) return;
+        sentMessage.edit(`${dots[dotIndex]}`);
+        dotIndex = (dotIndex + 1) % dots.length;
+    }, 1000); // 每 1 秒更新一次
 
+    // 網路搜尋提供參考
+    if (content.startsWith('?') || content.startsWith('？')) {
+        content = content.slice(1).trim();
+        searchSummary = await searchGoogle(content);
+    }
+
+    // 組合上下文
+    const fullPrompt = await composeFullPrompt(userId, content, searchSummary);
+
+    // 詢問 LLM
+    aiReply = await askLLM(fullPrompt, useModel);
+    modelName = MODEL_OPTIONS[useModel].name;
+
+    if (!aiReply) {
+        // 結束回覆思考動畫
+        running = false;
+        clearInterval(intervalId);
+        await sentMessage.edit("目前所有模型皆無回應，請稍後再試。");
+        return;
+    }
+
+    // 儲存對話記憶並處理壓縮
+    const newRound = { q: content, a: aiReply };
+    const contextLength = record.context.length;
+    if (contextLength >= 1) {
+        const prevRound = record.context[contextLength - 1];  // 僅對倒數第 2 輪進行
+
+        if (prevRound.q.length > COMPRESSION_TRIGGER_LENGTH) {
+            prevRound.q = await compressTextWithLLM(prevRound.q, COMPRESSION_TARGET_TOKENS.threshold, useModel);
+        }
+
+        if (prevRound.a.length > COMPRESSION_TRIGGER_LENGTH) {
+            prevRound.a = await compressTextWithLLM(prevRound.a, COMPRESSION_TARGET_TOKENS.threshold, useModel);
+        }
+    }
+
+    // 結束回覆思考動畫
+    running = false;
+    clearInterval(intervalId);
+
+    // 推入最新對話
+    record.context.push(newRound);
+
+    // 更新記憶
+    memoryManager.setMemory(userId, record);
+
+    // 記錄並格式化回覆
+    const formattedReply = [
+        `${searchSummary ? '> 🌐 ' : ''}`,  // 搜尋符號
+        aiReply,         // 模型的回應內容
+        aiReply && `\`by ${modelName}\``  // 模型名稱
+    ].filter(Boolean).join('\n');
+
+    // 發送分段訊息
+    const chunks = splitDiscordMessage(formattedReply, MAX_DISCORD_REPLY_LENGTH, userId);
+    if (chunks.length > 0) {
+        await sentMessage.edit(chunks[0]);
+        memoryManager.setMessageOwner(sentMessage.id, userId);
+        for (let i = 1; i < chunks.length; i++) {
+            const currentFollowUp = await message.reply(chunks[i]);
+            memoryManager.setMessageOwner(currentFollowUp.id, userId);
+        }
+    }
 }
 
 // 調試記憶體內容
@@ -437,19 +544,18 @@ __GroupId__: ${groupId}
 //#region 子函式
 
 // 遍歷可用模型並詢問 LLM
-const askLLM = async (query, useModel) => {
+const askLLM = async (query, model) => {
     let triedModels = 0;  // 記錄嘗試過的模型數量
     let key = null;
     let answer = null;
 
     while (triedModels < modelKeys.length) {
         // 從選定模型往後開始循環
-        key = modelKeys[(modelKeys.indexOf(useModel) + triedModels) % modelKeys.length];
+        key = modelKeys[(modelKeys.indexOf(model) + triedModels) % modelKeys.length];
 
         try {
             // 詢問 LLM
             answer = await MODEL_OPTIONS[key].handler(query, MODEL_OPTIONS[key]);
-            //useModel
             if (typeof answer === 'string' && answer.trim()) {
                 break;  // 找到有效回應後跳出循環
             } else {
@@ -464,16 +570,10 @@ const askLLM = async (query, useModel) => {
 
     if (!answer) {
         console.error(`[ERROR]模型皆無回應`);
-        return {
-            response: null,
-            usableModel: key,
-        }
+        return null;
     }
 
-    return {
-        response: answer,
-        usableModel: key,
-    }
+    return answer;
 }
 
 // 搜尋網路參考
@@ -531,7 +631,7 @@ const composeFullPrompt = async (userId, currentQuestion, searchSummary = "") =>
 // 摘要壓縮
 const compressTextWithLLM = async (content, targetTokens, useModel) => {
     const prompt = `請將以下段落濃縮成不超過 ${targetTokens} token 的摘要，保留關鍵資訊與主要邏輯脈絡：\n\n${content}`;
-    return (await askLLM(prompt, useModel)).response || '';
+    return (await askLLM(prompt, useModel)) || '';
 };
 
 // 分段訊息
@@ -572,8 +672,10 @@ async function askGemini(prompt, modelConfig) {
     const model = modelConfig.name;
 
     // 檢查 prompt 是否包含中文字符，加入簡潔提示詞
-    if (/[\u4e00-\u9fa5]/.test(prompt)) {
-        prompt = `如果回答中使用中文，請使用繁體中文並避免簡體字。\n${prompt}`;
+    const userTextMatch = prompt.match(/使用者：([\s\S]*)$/);
+    const userText = userTextMatch?.[1]?.trim() || '';
+    if (/[\u4e00-\u9fa5]/.test(userText)) {
+        prompt = `${prompt}\n（如果你的回答中有使用中文，請使用繁體中文並避免簡體字。）`;
     }
 
     const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`, {
@@ -585,8 +687,9 @@ async function askGemini(prompt, modelConfig) {
     });
 
     if (!response.ok) {
-        console.error(`[ERROR]Gemini Error: ${response.status} ${response.statusText}`);
-        return { content: '', model };  // 空回應
+        const errorText = await response.text();
+        console.error(`[ERROR]Gemini Error: ${response.status} ${response.statusText}\n${errorText}`);
+        return '';  // 空回應
     }
 
     const data = await response.json();
@@ -597,18 +700,17 @@ async function askGemini(prompt, modelConfig) {
 
 // 使用 Openrouter 模型
 async function askOpenrouter(prompt, modelConfig) {
-    const modelName = modelConfig.name;
+    const model = modelConfig.name;
 
     const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
         headers: {
             'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
             'Content-Type': 'application/json',
-            'HTTP-Referer': 'https://yourdomain.com/',
             'X-Title': 'DiscordBot'
         },
         body: JSON.stringify({
-            model: modelName,
+            model,
             messages: [
                 { role: 'system', content: '你是一個友善又簡潔的 Discord 機器人助手，用繁體中文回答問題。' },
                 { role: 'user', content: prompt }
@@ -617,11 +719,12 @@ async function askOpenrouter(prompt, modelConfig) {
     });
 
     if (!response.ok) {
-        console.error(`[ERROR]Openrouter Error: ${response.statusText}`);
+        const errorText = await response.text();
+        console.error(`[ERROR]Openrouter Error: ${response.status} ${response.statusText}\n${errorText}`);
         return '';  // 空回應
     }
 
     const data = await response.json();
-    return data.choices?.[0]?.message?.content || '';
+    return data?.choices?.[0]?.message?.content || data?.choices?.[0]?.text || '';
 }
 //#endregion

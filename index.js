@@ -107,37 +107,40 @@ client.once("ready", async () => {
         if (process.env.REGISTER_COMMANDS === "true") {
             console.info("[INFO]刪除舊命令並註冊新命令...");
 
-            // 拉取目前伺服器中的所有命令
-            const existingCommands = await rest.get(
-                Routes.applicationGuildCommands(
-                    process.env.CLIENT_ID,
-                    process.env.GUILD_ID,
-                ),
-            );
-
-            // 刪除所有舊命令
-            for (const command of existingCommands) {
-                await rest.delete(
-                    Routes.applicationGuildCommand(
+            const guildIds = process.env.GUILD_IDS.split(',').map(id => id.trim());
+            for (const guildId of guildIds) {
+                // 拉取目前伺服器中的所有命令
+                const existingCommands = await rest.get(
+                    Routes.applicationGuildCommands(
                         process.env.CLIENT_ID,
-                        process.env.GUILD_ID,
-                        command.id,
+                        guildId,
                     ),
                 );
-                console.info("[INFO]刪除舊命令：" + command.id);
-            }
 
-            // 註冊新的命令
-            console.info("[INFO]註冊新命令...");
-            await rest.put(
-                Routes.applicationGuildCommands(
-                    process.env.CLIENT_ID,
-                    process.env.GUILD_ID,
-                ),
-                {
-                    body: theCommands,
-                },
-            );
+                // 刪除所有舊命令
+                for (const command of existingCommands) {
+                    await rest.delete(
+                        Routes.applicationGuildCommand(
+                            process.env.CLIENT_ID,
+                            guildId,
+                            command.id,
+                        ),
+                    );
+                    console.info("[INFO]刪除舊命令：" + command.id);
+                }
+
+                // 註冊新的命令
+                console.info("[INFO]註冊新命令...");
+                await rest.put(
+                    Routes.applicationGuildCommands(
+                        process.env.CLIENT_ID,
+                        guildId,
+                    ),
+                    {
+                        body: theCommands,
+                    },
+                );
+            }
             console.info("[INFO]Slash Commands 重新註冊成功");
         } else {
             console.info("[INFO]Slash Commands 已註冊");
@@ -293,10 +296,10 @@ client.on("interactionCreate", async (interaction) => {
 
     // /control（僅限 admin）
     if (interaction.commandName === "control") {
-        const adminRoleId = process.env.ADMIN_ROLE_ID;
         const member = interaction.member;
+        const adminRoleIds = process.env.ADMIN_ROLE_IDS.split(',').map(id => id.trim());
 
-        if (!member || !member.roles.cache.has(adminRoleId)) {
+        if (!member || !member.roles.cache.some(role => adminRoleIds.includes(role.id))) {
             await interaction.reply({ content: "❌ 你沒有使用此指令的權限。", flags: 64 });
             return;
         }
@@ -354,11 +357,18 @@ client.on("interactionCreate", async (interaction) => {
     // /ask
     if (interaction.commandName === "ask") {
         // 限定使用頻道
-        const allowedChannels = [process.env.ASK_CHANNEL_ID, process.env.NOTEPAD_CHANNEL_ID];
+        const allowedChannels = [
+            ...process.env.ASK_CHANNEL_IDS.split(','),
+            ...process.env.DEBUG_ASK_CHANNEL_IDS.split(','),
+        ].map(id => id.trim());
         if (!allowedChannels.includes(interaction.channelId)) {
+            const channelMentions = allowedChannels
+                .filter(id => process.env.ASK_CHANNEL_IDS.includes(id))
+                .map(id => `<#${id}>`)
+                .join('、');
             return interaction.reply({
-                content: `抱歉，提問請在 <#${process.env.ASK_CHANNEL_ID}> 進行。`,
-                flags: 64,
+                content: `抱歉，提問請在 ${channelMentions || '指定頻道'} 進行。`,
+                flags: 64, // ephemeral
             });
         }
 
@@ -408,7 +418,8 @@ client.on("messageCreate", async (message) => {
     const content = message.content;
 
     // 捕獲中止命令 !stopTheDiscordBot
-    if (content.includes("!stopTheDiscordBot") && message.member.roles.cache.has(process.env.ADMIN_ROLE_ID)) {
+    const adminRoleIds = process.env.ADMIN_ROLE_IDS.split(',').map(id => id.trim());
+    if (content.includes("!stopTheDiscordBot") && message.member.roles.cache.some(role => adminRoleIds.includes(role.id))) {
         isStoppingBot = 'true';
         console.info("[INFO]執行 !stopTheDiscordBot");
         await message.reply("おやすみなさい。");

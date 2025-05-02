@@ -1,5 +1,5 @@
 import { Client, GatewayIntentBits, REST, Routes } from "discord.js";
-import { MODEL_OPTIONS, setAsk, clsAsk, slashAsk, replyAsk, replyMemory } from "./askHandler.js";
+import { MODEL_OPTIONS, setAsk, clsAsk, slashAsk, replyAsk, replyMemory, handleMsgOwner } from "./askHandler.js";
 import { theTimestamp } from "./timestamp.js";
 import { theRollDice } from "./rolldice.js";
 import { slashHelp } from "./misc.js";
@@ -439,6 +439,11 @@ client.on("messageCreate", async (message) => {
 
     if (shouldHandle(content, "!roll")) {
         await theRollDice(content, message);
+    }
+
+    // 測試用途
+    if (shouldHandle(content, "!msgOwner")) {
+        await handleMsgOwner(content, msg => message.reply(msg));
     }
 });
 

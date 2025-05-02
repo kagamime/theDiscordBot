@@ -30,6 +30,7 @@ const modelKeys = Object.keys(MODEL_OPTIONS);
 const MAX_DISCORD_REPLY_LENGTH = 1800;  // Discord 單則訊息的字數上限
 const MAX_SEARCH_SUMMARY_LENGTH = 700;  // 網路搜尋結果的字數上限
 const CONTEXT_TIMEOUT_MINUTES = 10;      // 時限內未互動，進行主題檢查
+const QUEUE_LOCK_TIMEOUT = 10;           // 群組排隊鎖最大逾時
 const MAX_CONTEXT_ROUND = 5;             // 對話記憶上限
 const SUMMARY_ROUND_COUNT = 3;           // 摘要化舊對話輪數
 const COMPRESSION_TRIGGER_LENGTH = 300;  // 上下文壓縮閾值
@@ -47,10 +48,13 @@ if (SUMMARY_ROUND_COUNT >= MAX_CONTEXT_ROUND) {
 class MemoryManager {
     constructor() {
         this.messageOwner = new Map(); // messageId -> userId (對話訊息擁有者)
-        this.userMemory = new Map();   // userId -> record
-        this.groupMemory = new Map();  // groupId -> record
+        this.userMemory = new Map();   // userId -> record{}
+        this.groupMemory = new Map();  // groupId -> record{}
         this.groupCounter = 1;         // 流水號給新的 groupId
+        this.queueLock = new Map();    // groupId -> queue[]
     }
+
+    // ---- userMemory / groupMemory ----
 
     // 初始化記憶模板
     cloneRecord(src = {}) {
@@ -180,6 +184,8 @@ class MemoryManager {
         return 'removed';
     }
 
+    // ---- MessageOwner ----
+
     // 取得對話訊息的擁有者
     getMessageOwner(messageId) {
         if (!this.messageOwner) {
@@ -211,14 +217,14 @@ class MemoryManager {
 
         // 如果使用者有群組且群組內有其他成員
         if (groupRecord && groupRecord.participants.size > 2) {
-            // 遍歷訊息並轉移所有權
-            for (let [msgId, ownerId] of this.messageOwner) {
-                if (ownerId === userId) {
-                    for (let participant of groupRecord.participants) {
-                        if (participant !== userId) {
-                            this.messageOwner.set(msgId, participant); // 轉移所有權
-                            break;
-                        }
+            // 找出一個非 userId 的參與者作為新擁有者
+            const newOwnerId = [...groupRecord.participants].find(p => p !== userId);
+
+            if (newOwnerId) {
+                // 統一轉移所有權
+                for (let [msgId, ownerId] of this.messageOwner) {
+                    if (ownerId === userId) {
+                        this.messageOwner.set(msgId, newOwnerId);
                     }
                 }
             }
@@ -232,6 +238,75 @@ class MemoryManager {
         }
     }
 
+    // 手動移轉所有權 - 測試用途
+    changeMessageOwner(messageId, userId) {
+        const newOwnerId = userId || (() => 'user_' + Math.random().toString(36).substring(2, 10))();
+        this.messageOwner.set(messageId, newOwnerId);
+    }
+
+    // ---- queueLock ----
+
+    // 第一次呼叫：加入排隊
+    queueLockEnter(groupId, timeout = 10000) {
+        if (!this.queueLock.has(groupId)) {
+            this.queueLock.set(groupId, []);
+        }
+
+        const queue = this.queueLock.get(groupId); // 取得對應的隊列
+
+        let timeoutId; // 用來存儲 timeout 設定的 ID
+
+        return new Promise((resolve, reject) => {
+            const isFirst = queue.length === 0; // 判斷目前的隊列是否是空的，即是否是第一個進來的請求
+
+            // 定義排隊後解鎖的函數
+            const wrappedResolve = () => {
+                clearTimeout(timeoutId);  // 排隊完成後清除 timeout 設定
+                resolve();  // 完成排隊，放行
+            };
+
+            // 把 wrappedResolve（解鎖函數）放到隊列中
+            queue.push(wrappedResolve);
+
+            // 如果是第一個進來的請求，立即放行
+            if (isFirst) {
+                wrappedResolve();  // 第一個請求不需要等待，立刻解鎖
+            }
+
+            // 設定超時機制：超過 timeout 時候 reject 排隊
+            timeoutId = setTimeout(() => {
+                const index = queue.indexOf(wrappedResolve);  // 查找請求是否還在隊列中
+                if (index !== -1) {
+                    queue.splice(index, 1);  // 如果請求還在隊列中，將其移除
+                }
+                reject(new Error(`queueLockEnter timeout (${timeout}ms)`));  // 超時，拒絕這個請求
+            }, timeout);
+        });
+    }
+
+    /* ////--使用例--
+    try {
+      // 排隊並自動處理 timeout
+      await memoryManager.queueLockEnter(groupId, 1000 * QUEUE_LOCK_TIMEOUT);  // 超時
+      const reply = await askLLM(query, model);  // 詢問 LLM
+      // 寫入記憶
+    } catch (err) {
+      console.error(`[LOCK ERROR]`, err);  // 處理 timeout 或其他錯誤
+    } finally {
+      memoryManager.queueLockLeave(groupId);  // 釋放排隊
+    }
+    */
+
+    // 第二次呼叫：釋放排隊（用於寫入記憶） ////注意ask失敗時或有先return情況
+    queueLockLeave(groupId) {
+        const queue = this.queueLock.get(groupId);
+        if (!queue || queue.length === 0) return;
+
+        queue.shift(); // 自己離開
+
+        const next = queue[0];
+        if (next) next(); // 放行下一位
+    }
 }
 const memoryManager = new MemoryManager();
 //#endregion
@@ -299,11 +374,12 @@ export const slashAsk = async (interaction, query, selectedModel) => {
     if (Date.now() - record.lastInteraction > timeoutThreshold && record.context.length > 0) {
         // --- 逾時主題判斷 ---
         const recentQuestions = record.context.slice(-3).map(item => `Q：${item.q}`).join('\n');
-        const topicCheckPrompt = `以下是使用者近期的提問：\n${recentQuestions}\n\n現在他問：「${query}」\n\n這是否為相似主題？請僅回答「是」或「否」。`;
+        // 使用者的先前提問 / 目前輸入 / 這是否屬於相似主題？請僅回答「是」或「否」。
+        const topicCheckPrompt = `User's previous questions:\n${recentQuestions}\n\nCurrent input: ${query}\n\nIs this topic similar? Reply with "Yes" or "No".`;
 
         try {
             const topicCheckResult = await askLLM(topicCheckPrompt, useModel);
-            const isSameTopic = topicCheckResult?.trim().startsWith("是");
+            const isSameTopic = topicCheckResult?.trim().startsWith("Yes");
 
             if (!isSameTopic) {
                 memoryManager.removeMessageOwner(userId);
@@ -371,7 +447,7 @@ export const slashAsk = async (interaction, query, selectedModel) => {
         const overflow = record.context.splice(0, SUMMARY_ROUND_COUNT);  // 取出前面的
         const mergedText = [
             record.summary,
-            ...overflow.map(item => `使用者：${item.q}\n你：${item.a}`)
+            ...overflow.map(item => `User: ${item.q}\nAssistant: ${item.a}`)
         ].filter(Boolean).join("\n\n");
 
         const summaryResult = await compressTextWithLLM(mergedText, COMPRESSION_TARGET_TOKENS.merge, useModel);
@@ -539,6 +615,29 @@ __GroupId__: ${groupId}
         }
     }
 };
+
+// 手動移轉所有權 - 測試用途
+export const handleMsgOwner = async (content, replyFunc) => {
+    const args = content.trim().split(/\s+/); // 切割空白
+
+    if (args.length < 2) {
+        return replyFunc("❌ 格式錯誤：請使用 `!msgOwner <msgId> [userId]`");
+    }
+
+    const msgId = args[1];
+    const userId = args[2]; // 可選
+
+    try {
+        memoryManager.changeMessageOwner(msgId, userId);
+        const msg = userId
+            ? `✅ 已將 ${msgId} 的擁有者改為 ${userId}`
+            : `✅ 已將 ${msgId} 的擁有者改為隨機用戶`;
+        await replyFunc(msg);
+    } catch (err) {
+        console.error("changeMessageOwner 錯誤:", err);
+        await replyFunc("❌ 發生錯誤，無法變更擁有者");
+    }
+};
 //#endregion
 
 //#region 子函式
@@ -607,19 +706,22 @@ const composeFullPrompt = async (userId, currentQuestion, searchSummary = "") =>
     const record = memoryManager.getMemory(userId);
     const { preset, context, summary } = record;
 
-    const formattedSummary = summary ? `（以下為前情摘要供參考）\n${summary}` : "";
+    // （你是一個 Discord 機器人助手。請簡潔地回應，並遵循使用者的前提或指示。配合使用者的語言回答；若為中文，請使用繁體中文。）
+    const instruction = "(You are a Discord bot assistant. Respond concisely and follow user's premise or instructions. Always answer in the user's language. If Chinese, use Traditional Chinese.)";
+    const formattedSummary = summary ? `[Summary]\n${summary}` : "";
     const formattedContext = context.length > 0
-        ? `（以下為你與使用者過去的對話供參考）\n` +
-        context.map(item => `使用者：${item.q}\n你：${item.a}`).join("\n\n")
+        ? `[History]\n` +
+        context.map(item => `User: ${item.q}\nAssistant: ${item.a}`).join("\n\n")
         : "";
 
     // 前提 + 前情摘要 + 上下文 + 搜尋結果 + 當前提問
     const fullPrompt = [
-        preset && `前提：${preset}`,
+        instruction,
+        preset && `[Premise]\n${preset}`,
         formattedSummary,
         formattedContext,
-        searchSummary ? `（可根據下方搜尋結果作答，資訊不足請誠實回答，不提及「根據搜尋」等語句）\n${searchSummary}` : '',
-        `使用者：${currentQuestion}`
+        searchSummary ? `[Search]\n(Use the search results below if helpful, but don't mention or refer to them.)\n${searchSummary}` : '',  // （如果下方的搜尋結果有幫助可以使用，但不要提及或引用它們。）
+        `[User's Current Input]\nUser: ${currentQuestion}`
     ].filter(Boolean).join("\n\n");
 
     if (process.env.DEBUG_FULLPROMPT === "true") {
@@ -630,7 +732,8 @@ const composeFullPrompt = async (userId, currentQuestion, searchSummary = "") =>
 
 // 摘要壓縮
 const compressTextWithLLM = async (content, targetTokens, useModel) => {
-    const prompt = `請將以下段落濃縮成不超過 ${targetTokens} token 的摘要，保留關鍵資訊與主要邏輯脈絡：\n\n${content}`;
+    // 請將以下段落濃縮成不超過 / token 的摘要，保留關鍵資訊與主要邏輯脈絡
+    const prompt = `Please condense the following paragraph into a summary of no more than ${targetTokens} tokens, retaining key information and the main logical flow:\n\n${content}`;
     return (await askLLM(prompt, useModel)) || '';
 };
 
@@ -671,13 +774,6 @@ const splitDiscordMessage = (content, maxLength, userId = null) => {
 async function askGemini(prompt, modelConfig) {
     const model = modelConfig.name;
 
-    // 檢查 prompt 是否包含中文字符，加入簡潔提示詞
-    const userTextMatch = prompt.match(/使用者：([\s\S]*)$/);
-    const userText = userTextMatch?.[1]?.trim() || '';
-    if (/[\u4e00-\u9fa5]/.test(userText)) {
-        prompt = `${prompt}\n（如果你的回答中有使用中文，請使用繁體中文並避免簡體字。）`;
-    }
-
     const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -688,7 +784,7 @@ async function askGemini(prompt, modelConfig) {
 
     if (!response.ok) {
         const errorText = await response.text();
-        console.error(`[ERROR]Gemini Error: ${response.status} ${response.statusText}\n${errorText}`);
+        console.error(`[ERROR]askGemini Error: ${response.status} ${response.statusText}\n${errorText}`);
         return '';  // 空回應
     }
 
@@ -712,7 +808,6 @@ async function askOpenrouter(prompt, modelConfig) {
         body: JSON.stringify({
             model,
             messages: [
-                { role: 'system', content: '你是一個友善又簡潔的 Discord 機器人助手，用繁體中文回答問題。' },
                 { role: 'user', content: prompt }
             ]
         })
@@ -720,7 +815,7 @@ async function askOpenrouter(prompt, modelConfig) {
 
     if (!response.ok) {
         const errorText = await response.text();
-        console.error(`[ERROR]Openrouter Error: ${response.status} ${response.statusText}\n${errorText}`);
+        console.error(`[ERROR]askOpenrouter Error: ${response.status} ${response.statusText}\n${errorText}`);
         return '';  // 空回應
     }
 

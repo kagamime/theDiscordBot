@@ -396,6 +396,8 @@ client.on("messageCreate", async (message) => {
     if (isStoppingBot) return;       // !stopTheDiscordBot 後進入假眠
     if (message.author.bot) return;  // 忽略 Bot 自己的訊息
 
+    const content = message.content;
+
     // 確認這是一個 reply 訊息
     if (message.reference && message.reference.messageId) {
         try {
@@ -414,20 +416,26 @@ client.on("messageCreate", async (message) => {
         }
     }
 
-    const content = message.content;
-
-    // 捕獲中止命令 !stopTheDiscordBot
+    // 管理員指令
     const adminRoleIds = process.env.ADMIN_ROLE_IDS.split(',').map(id => id.trim());
-    if (content.includes("!stopTheDiscordBot") && message.member.roles.cache.some(role => adminRoleIds.includes(role.id))) {
-        isStoppingBot = 'true';
-        console.info("[INFO]執行 !stopTheDiscordBot");
-        await message.reply("おやすみなさい。");
-        console.info("[INFO]🔴 theDiscordBot 停止中...");
-        client.destroy(() => {
-            console.info("[INFO]Discord 已離線");
-        }); // 停止 Discord Bot
+    if (message.member.roles.cache.some(role => adminRoleIds.includes(role.id))) {
+        // 捕獲中止命令 !stopTheDiscordBot
+        if (content.includes("!stopTheDiscordBot")) {
+            isStoppingBot = 'true';
+            console.info("[INFO]執行 !stopTheDiscordBot");
+            await message.reply("おやすみなさい。");
+            console.info("[INFO]🔴 theDiscordBot 停止中...");
+            client.destroy(() => {
+                console.info("[INFO]Discord 已離線");
+            }); // 停止 Discord Bot
 
-        return; // 不用 process.exit(0) 會被render重啟
+            return; // 不用 process.exit(0) 會被render重啟
+        }
+
+        // 測試用途
+        if (shouldHandle(content, "!owner")) {
+            await handleMsgOwner(content, msg => message.reply(msg));
+        }
     }
 
     if (shouldHandle(content, "!time")) {
@@ -438,11 +446,6 @@ client.on("messageCreate", async (message) => {
 
     if (shouldHandle(content, "!roll")) {
         await theRollDice(content, message);
-    }
-
-    // 測試用途
-    if (shouldHandle(content, "!msgOwner")) {
-        await handleMsgOwner(content, msg => message.reply(msg));
     }
 });
 

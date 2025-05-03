@@ -123,7 +123,7 @@ class MemoryManager {
     // 將 user 加入指定 group，或建立新 group
     addUserToGroup(userId, groupId) {
         // 群組初始化檢查
-        if (this.getUserGroupId(userId) === groupId && groupId != null) return;
+        if (groupId && this.getUserGroupId(userId) === groupId) return;
         this.removeUserFromGroup(userId);
 
         let isNewGroup = false;
@@ -194,7 +194,7 @@ class MemoryManager {
         }
         if (!this.messageOwner.has(messageId)) {
             console.warn(`[WARN]找不到訊息ID: ${messageId} 擁有者`);
-            return "none";
+            return null;
         }
         return this.messageOwner.get(messageId);
     }
@@ -240,7 +240,19 @@ class MemoryManager {
 
     // 手動移轉所有權 - 測試用途
     changeMessageOwner(messageId, userId) {
-        const newOwnerId = userId || (() => 'user_' + Math.random().toString(36).substring(2, 10))();
+        const newOwnerId = userId || ((Date.now() - 1420070400000) * 4194304 + Math.floor(Math.random() * 4194304)).toString(); // userId 未指定則隨機生成
+
+        // 記憶轉移
+        const oldOwnerId = this.messageOwner.get(messageId);
+        if (oldOwnerId && oldOwnerId !== newOwnerId) {
+            const oldRecord = this.userMemory.get(oldOwnerId);
+            if (oldRecord) {
+                this.userMemory.set(newOwnerId, oldRecord);
+                this.userMemory.delete(oldOwnerId);
+            }
+        }
+
+        // 記錄轉移
         this.messageOwner.set(messageId, newOwnerId);
     }
 
@@ -447,7 +459,7 @@ export const slashAsk = async (interaction, query, selectedModel) => {
         const overflow = record.context.splice(0, SUMMARY_ROUND_COUNT);  // 取出前面的
         const mergedText = [
             record.summary,
-            ...overflow.map(item => `User: ${item.q}\nAssistant: ${item.a}`)
+            ...overflow.map(item => `User: ${item.q}\nYou: ${item.a}`)
         ].filter(Boolean).join("\n\n");
 
         const summaryResult = await compressTextWithLLM(mergedText, COMPRESSION_TARGET_TOKENS.merge, useModel);
@@ -485,29 +497,21 @@ export const replyAsk = async (message, messageId) => {
     const ownerGroup = memoryManager.getUserGroupId(ownerId);
     const content = message.content;
 
-    let aiReply = '', modelName = '', searchSummary = '';
-    const record = memoryManager.getMemory(userId);
-
-    // 檢查ownerId存在、messageId所屬身分非自己，或非同群組    
-    if (!ownerId || ownerId === userId || (ownerGroup != null && ownerGroup === memoryManager.getUserGroupId(userId))) return;
+    // 檢查ownerId存在、messageId所屬身分非自己，或非同群組
+    if (!ownerId || ownerId === userId || (ownerGroup && ownerGroup === memoryManager.getUserGroupId(userId))) return;
 
     // 加入或建立群組
     if (ownerGroup) {
         memoryManager.addUserToGroup(userId, ownerGroup);
     } else {
-        memoryManager.addUserToGroup(userId, memoryManager.addUserToGroup(ownerId));
+        const newGroup = memoryManager.addUserToGroup(ownerId);
+        memoryManager.addUserToGroup(userId, newGroup);
     }
 
     // 回覆思考動畫
-    const dots = ['。', '。。', '。。。'];
-    let dotIndex = 0;
-    let running = true;
-    const sentMessage = await message.reply("。。。");
-    const intervalId = setInterval(() => {
-        if (!running) return;
-        sentMessage.edit(`${dots[dotIndex]}`);
-        dotIndex = (dotIndex + 1) % dots.length;
-    }, 1000); // 每 1 秒更新一次
+    const sentMessage = await message.reply("https://cdn.discordapp.com/attachments/876975982110703637/1368209561240080434/think.gif");
+    
+    let aiReply = '', modelName = '', searchSummary = '';
 
     // 網路搜尋提供參考
     if (content.startsWith('?') || content.startsWith('？')) {
@@ -523,14 +527,12 @@ export const replyAsk = async (message, messageId) => {
     modelName = MODEL_OPTIONS[useModel].name;
 
     if (!aiReply) {
-        // 結束回覆思考動畫
-        running = false;
-        clearInterval(intervalId);
         await sentMessage.edit("目前所有模型皆無回應，請稍後再試。");
         return;
     }
 
     // 儲存對話記憶並處理壓縮
+    const record = memoryManager.getMemory(userId);
     const newRound = { q: content, a: aiReply };
     const contextLength = record.context.length;
     if (contextLength >= 1) {
@@ -544,10 +546,6 @@ export const replyAsk = async (message, messageId) => {
             prevRound.a = await compressTextWithLLM(prevRound.a, COMPRESSION_TARGET_TOKENS.threshold, useModel);
         }
     }
-
-    // 結束回覆思考動畫
-    running = false;
-    clearInterval(intervalId);
 
     // 推入最新對話
     record.context.push(newRound);
@@ -706,12 +704,12 @@ const composeFullPrompt = async (userId, currentQuestion, searchSummary = "") =>
     const record = memoryManager.getMemory(userId);
     const { preset, context, summary } = record;
 
-    // （你是一個 Discord 機器人助手。請簡潔地回應，並遵循使用者的前提或指示。配合使用者的語言回答；若為中文，請使用繁體中文。）
-    const instruction = "(You are a Discord bot assistant. Respond concisely and follow user's premise or instructions. Always answer in the user's language. If Chinese, use Traditional Chinese.)";
+    // （你是一個 Discord 助手。請簡潔地回應，並遵循使用者的前提或指示。以下所有對話都是你與使用者之間的交流。配合使用者的語言回答；若為中文，請使用繁體中文。）
+    const instruction = "(You are a Discord assistant. Respond concisely and follow user's premise or instructions. All dialogue below is between you and the user. Always answer in the user's language. If Chinese, use Traditional Chinese.)";
     const formattedSummary = summary ? `[Summary]\n${summary}` : "";
     const formattedContext = context.length > 0
         ? `[History]\n` +
-        context.map(item => `User: ${item.q}\nAssistant: ${item.a}`).join("\n\n")
+        context.map(item => `User: ${item.q}\nYou: ${item.a}`).join("\n\n")
         : "";
 
     // 前提 + 前情摘要 + 上下文 + 搜尋結果 + 當前提問
@@ -721,7 +719,7 @@ const composeFullPrompt = async (userId, currentQuestion, searchSummary = "") =>
         formattedSummary,
         formattedContext,
         searchSummary ? `[Search]\n(Use the search results below if helpful, but don't mention or refer to them.)\n${searchSummary}` : '',  // （如果下方的搜尋結果有幫助可以使用，但不要提及或引用它們。）
-        `[User's Current Input]\nUser: ${currentQuestion}`
+        `[User's Current Input]\nUser: ${currentQuestion}\n\n(Continue the conversation.)`  // （繼續對話）
     ].filter(Boolean).join("\n\n");
 
     if (process.env.DEBUG_FULLPROMPT === "true") {

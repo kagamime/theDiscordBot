@@ -1,8 +1,7 @@
 import { Client, GatewayIntentBits, REST, Routes } from "discord.js";
 import { MODEL_OPTIONS, setAsk, clsAsk, slashAsk, replyAsk, replyMemory, handleMsgOwner } from "./askHandler.js";
 import { theTimestamp } from "./timestamp.js";
-import { theRollDice } from "./rolldice.js";
-import { slashHelp } from "./misc.js";
+import { slashHelp, theRollDice } from "./misc.js";
 import express from "express";
 import dotenv from "dotenv";
 dotenv.config();

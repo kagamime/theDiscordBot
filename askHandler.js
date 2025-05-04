@@ -258,18 +258,22 @@ class MemoryManager {
 
     // ---- queueLock ----
 
-    // 第一次呼叫：加入排隊
-    queueLockEnter(groupId, timeout = 10000) {
+    // 加入排隊
+    queueLockEnter(groupId) {
+        if (!groupId) return;
         if (!this.queueLock.has(groupId)) {
             this.queueLock.set(groupId, []);
         }
 
-        const queue = this.queueLock.get(groupId); // 取得對應的隊列
+        console.log(`////[DEBUG] ${groupId}排隊: \`${Date.now()}\``);
 
-        let timeoutId; // 用來存儲 timeout 設定的 ID
+        const timeout = QUEUE_LOCK_TIMEOUT * 1000;  // 逾時上限
+        const queue = this.queueLock.get(groupId);  // 取得對應的隊列
+
+        let timeoutId;  // 用來存儲 timeout 設定的 ID
 
         return new Promise((resolve, reject) => {
-            const isFirst = queue.length === 0; // 判斷目前的隊列是否是空的，即是否是第一個進來的請求
+            const isFirst = queue.length === 0;  // 判斷目前的隊列是否是空的，即是否是第一個進來的請求
 
             // 定義排隊後解鎖的函數
             const wrappedResolve = () => {
@@ -293,24 +297,13 @@ class MemoryManager {
                 }
                 reject(new Error(`queueLockEnter timeout (${timeout}ms)`));  // 超時，拒絕這個請求
             }, timeout);
+            console.log(`////[DEBUG] ${groupId}離隊: \`${Date.now()}\``);
         });
     }
 
-    /* ////--使用例--
-    try {
-      // 排隊並自動處理 timeout
-      await memoryManager.queueLockEnter(groupId, 1000 * QUEUE_LOCK_TIMEOUT);  // 超時
-      const reply = await askLLM(query, model);  // 詢問 LLM
-      // 寫入記憶
-    } catch (err) {
-      console.error(`[LOCK ERROR]`, err);  // 處理 timeout 或其他錯誤
-    } finally {
-      memoryManager.queueLockLeave(groupId);  // 釋放排隊
-    }
-    */
-
-    // 第二次呼叫：釋放排隊（用於寫入記憶） ////注意ask失敗時或有先return情況
+    // 釋放排隊，準備寫入記憶
     queueLockLeave(groupId) {
+        if (!groupId) return;
         const queue = this.queueLock.get(groupId);
         if (!queue || queue.length === 0) return;
 
@@ -318,7 +311,22 @@ class MemoryManager {
 
         const next = queue[0];
         if (next) next(); // 放行下一位
+        console.log(`////[DEBUG] ${groupId}放行: \`${Date.now()}\``);
     }
+
+    /* ----使用例----
+    try {
+        // 開始排隊
+        await memoryManager.queueLockEnter(groupId);
+        ...
+        // 準備寫入記憶
+    } catch (err) {
+        console.error(`[LOCK ERROR]`, err);  // 處理 timeout 或其他錯誤
+    } finally {
+        // 釋放排隊，準備寫入記憶  
+        memoryManager.queueLockLeave(groupId);
+    }
+    */
 }
 const memoryManager = new MemoryManager();
 //#endregion
@@ -380,90 +388,104 @@ export const slashAsk = async (interaction, query, selectedModel) => {
     const userId = interaction.user.id;
     const userTag = interaction.user.tag;
     const record = memoryManager.getMemory(userId);
+    const groupId = memoryManager.getUserGroupId(userId);
+    const startTime = Date.now();  // 思考計時
 
-    // 逾時主題檢查
-    const timeoutThreshold = CONTEXT_TIMEOUT_MINUTES * 60 * 1000;
-    if (Date.now() - record.lastInteraction > timeoutThreshold && record.context.length > 0) {
-        // --- 逾時主題判斷 ---
-        const recentQuestions = record.context.slice(-3).map(item => `Q：${item.q}`).join('\n');
-        // 使用者的先前提問 / 目前輸入 / 這是否屬於相似主題？請僅回答「是」或「否」。
-        const topicCheckPrompt = `User's previous questions:\n${recentQuestions}\n\nCurrent input: ${query}\n\nIs this topic similar? Reply with "Yes" or "No".`;
+    try {
+        // 開始排隊
+        await memoryManager.queueLockEnter(groupId);
 
-        try {
-            const topicCheckResult = await askLLM(topicCheckPrompt, useModel);
-            const isSameTopic = topicCheckResult?.trim().startsWith("Yes");
+        // 逾時主題檢查
+        const timeoutThreshold = CONTEXT_TIMEOUT_MINUTES * 60 * 1000;
+        if (Date.now() - record.lastInteraction > timeoutThreshold && record.context.length > 0) {
+            // --- 逾時主題判斷 ---
+            const recentQuestions = record.context.slice(-3).map(item => `Q：${item.q}`).join('\n');
+            // （使用者的先前提問 / 目前輸入 / 這是否屬於相似主題？請僅回答「是」或「否」。）
+            const topicCheckPrompt = `User's previous questions:\n${recentQuestions}\n\nCurrent input: ${query}\n\nIs this topic similar? Reply with "Yes" or "No".`;
 
-            if (!isSameTopic) {
-                memoryManager.removeMessageOwner(userId);
+            try {
+                const topicCheckResult = await askLLM(topicCheckPrompt, useModel);
+                const isSameTopic = topicCheckResult?.trim().startsWith("Yes");
 
-                if (!memoryManager.removeUserFromGroup(userId)) {
-                    record.context = memoryManager.cloneRecord().context;
-                    record.summary = memoryManager.cloneRecord().summary;
-                    memoryManager.setMemory(userId, record);
+                if (!isSameTopic) {
+                    memoryManager.removeMessageOwner(userId);
+
+                    if (!memoryManager.removeUserFromGroup(userId)) {
+                        record.context = memoryManager.cloneRecord().context;
+                        record.summary = memoryManager.cloneRecord().summary;
+                        memoryManager.setMemory(userId, record);
+                    }
+                    console.info(`[SET] ${userTag}>主題變更，清除記憶：`);
                 }
-                console.info(`[SET] ${userTag}>主題變更，清除記憶：`);
+            } catch (err) {
+                console.warn(`[WARN] 主題判斷失敗：${err.message}`);
+                // 為保險仍保留記憶
             }
-        } catch (err) {
-            console.warn(`[WARN] 主題判斷失敗：${err.message}`);
-            // 為保險仍保留記憶
-        }
-    }
-
-    // 網路搜尋提供參考
-    if (content.startsWith('?') || content.startsWith('？')) {
-        content = content.slice(1).trim();
-        searchSummary = await searchGoogle(content);
-    }
-
-    // 組合上下文
-    const fullPrompt = await composeFullPrompt(userId, content, searchSummary);
-
-    // 詢問 LLM
-    aiReply = await askLLM(fullPrompt, useModel);
-    modelName = MODEL_OPTIONS[useModel].name;
-
-    if (!aiReply) {
-        await interaction.editReply("目前所有模型皆無回應，請稍後再試。");
-        return;
-    }
-    if (useModel !== selectedModel) {
-        fallbackNotice = `\`${MODEL_OPTIONS[selectedModel].name} 沒回應\``;
-    }
-    console.log(
-        `[REPLY] ${userTag}> \`/ask\` ${content} - \`${MODEL_OPTIONS[selectedModel].name}\`` +
-        (useModel !== selectedModel
-            ? ` -> \`${MODEL_OPTIONS[useModel].name}\``
-            : '')
-    );
-
-    // 儲存對話記憶並處理壓縮
-    const newRound = { q: content, a: aiReply };
-    const contextLength = record.context.length;
-    if (contextLength >= 1) {
-        const prevRound = record.context[contextLength - 1];  // 僅對倒數第 2 輪進行
-
-        if (prevRound.q.length > COMPRESSION_TRIGGER_LENGTH) {
-            prevRound.q = await compressTextWithLLM(prevRound.q, COMPRESSION_TARGET_TOKENS.threshold, useModel);
         }
 
-        if (prevRound.a.length > COMPRESSION_TRIGGER_LENGTH) {
-            prevRound.a = await compressTextWithLLM(prevRound.a, COMPRESSION_TARGET_TOKENS.threshold, useModel);
+        // 網路搜尋提供參考
+        if (content.startsWith('?') || content.startsWith('？')) {
+            content = content.slice(1).trim();
+            searchSummary = await searchGoogle(content);
         }
-    }
 
-    // 推入最新對話
-    record.context.push(newRound);
+        // 組合上下文
+        const fullPrompt = await composeFullPrompt(userId, content, searchSummary);
 
-    // 檢查對話輪數並前情摘要化
-    if (record.context.length > MAX_CONTEXT_ROUND) {
-        const overflow = record.context.splice(0, SUMMARY_ROUND_COUNT);  // 取出前面的
-        const mergedText = [
-            record.summary,
-            ...overflow.map(item => `User: ${item.q}\nYou: ${item.a}`)
-        ].filter(Boolean).join("\n\n");
+        // 詢問 LLM
+        aiReply = await askLLM(fullPrompt, useModel);
+        modelName = MODEL_OPTIONS[useModel].name;
 
-        const summaryResult = await compressTextWithLLM(mergedText, COMPRESSION_TARGET_TOKENS.merge, useModel);
-        record.summary = summaryResult;
+        if (!aiReply) {
+            await interaction.editReply("目前所有模型皆無回應，請稍後再試。");
+            return;
+        }
+        if (useModel !== selectedModel) {
+            fallbackNotice = `\`${MODEL_OPTIONS[selectedModel].name} 沒回應\``;
+        }
+        console.log(
+            `[REPLY] ${userTag}> \`/ask\` ${content} - \`${MODEL_OPTIONS[selectedModel].name}\`` +
+            (useModel !== selectedModel
+                ? ` -> \`${MODEL_OPTIONS[useModel].name}\``
+                : '') + ` \`(took ${Date.now() - startTime} ms)\``
+        );
+
+        // 儲存對話記憶並處理壓縮
+        const newRound = { q: content, a: aiReply };
+        const contextLength = record.context.length;
+        if (contextLength >= 1) {
+            const prevRound = record.context[contextLength - 1];  // 僅對倒數第 2 輪進行
+
+            if (prevRound.q.length > COMPRESSION_TRIGGER_LENGTH) {
+                prevRound.q = await compressTextWithLLM(prevRound.q, COMPRESSION_TARGET_TOKENS.threshold, useModel);
+            }
+
+            if (prevRound.a.length > COMPRESSION_TRIGGER_LENGTH) {
+                prevRound.a = await compressTextWithLLM(prevRound.a, COMPRESSION_TARGET_TOKENS.threshold, useModel);
+            }
+        }
+
+        // 推入最新對話
+        record.context.push(newRound);
+
+        // 檢查對話輪數並前情摘要化
+        if (record.context.length > MAX_CONTEXT_ROUND) {
+            const overflow = record.context.splice(0, SUMMARY_ROUND_COUNT);  // 取出前面的
+            const mergedText = [
+                record.summary,
+                ...overflow.map(item => `User: ${item.q}\nYou: ${item.a}`)
+            ].filter(Boolean).join("\n\n");
+
+            const summaryResult = await compressTextWithLLM(mergedText, COMPRESSION_TARGET_TOKENS.merge, useModel);
+            record.summary = summaryResult;
+        }
+
+    } catch (err) {
+        console.error(`[LOCK ERROR]`, err);  // 處理 timeout 或其他錯誤
+    } finally {
+        // 釋放排隊，準備寫入記憶  
+        memoryManager.queueLockLeave(groupId);
+        console.info(`[INFO] \`(total time: ${Date.now() - startTime} ms)\``);
     }
 
     // 更新記憶
@@ -510,45 +532,61 @@ export const replyAsk = async (message, messageId) => {
 
     // 回覆思考動畫
     const sentMessage = await message.reply("https://cdn.discordapp.com/attachments/876975982110703637/1368209561240080434/think.gif");
-    
+
     let aiReply = '', modelName = '', searchSummary = '';
+    const startTime = Date.now();  // 思考計時
 
-    // 網路搜尋提供參考
-    if (content.startsWith('?') || content.startsWith('？')) {
-        content = content.slice(1).trim();
-        searchSummary = await searchGoogle(content);
-    }
+    try {
+        // 開始排隊
+        await memoryManager.queueLockEnter(newGroup);
 
-    // 組合上下文
-    const fullPrompt = await composeFullPrompt(userId, content, searchSummary);
-
-    // 詢問 LLM
-    aiReply = await askLLM(fullPrompt, useModel);
-    modelName = MODEL_OPTIONS[useModel].name;
-
-    if (!aiReply) {
-        await sentMessage.edit("目前所有模型皆無回應，請稍後再試。");
-        return;
-    }
-
-    // 儲存對話記憶並處理壓縮
-    const record = memoryManager.getMemory(userId);
-    const newRound = { q: content, a: aiReply };
-    const contextLength = record.context.length;
-    if (contextLength >= 1) {
-        const prevRound = record.context[contextLength - 1];  // 僅對倒數第 2 輪進行
-
-        if (prevRound.q.length > COMPRESSION_TRIGGER_LENGTH) {
-            prevRound.q = await compressTextWithLLM(prevRound.q, COMPRESSION_TARGET_TOKENS.threshold, useModel);
+        // 網路搜尋提供參考
+        if (content.startsWith('?') || content.startsWith('？')) {
+            content = content.slice(1).trim();
+            searchSummary = await searchGoogle(content);
         }
 
-        if (prevRound.a.length > COMPRESSION_TRIGGER_LENGTH) {
-            prevRound.a = await compressTextWithLLM(prevRound.a, COMPRESSION_TARGET_TOKENS.threshold, useModel);
-        }
-    }
+        // 組合上下文
+        const fullPrompt = await composeFullPrompt(userId, content, searchSummary);
 
-    // 推入最新對話
-    record.context.push(newRound);
+        // 詢問 LLM
+        aiReply = await askLLM(fullPrompt, useModel);
+        modelName = MODEL_OPTIONS[useModel].name;
+
+        if (!aiReply) {
+            await sentMessage.edit("目前所有模型皆無回應，請稍後再試。");
+            return;
+        }
+        console.log(
+            `[REPLY] ${userTag}> \`reply msg\` ${content} - \`${MODEL_OPTIONS[useModel].name}\` \`(took ${Date.now() - startTime} ms)\``
+        );
+
+        // 儲存對話記憶並處理壓縮
+        const record = memoryManager.getMemory(userId);
+        const newRound = { q: content, a: aiReply };
+        const contextLength = record.context.length;
+        if (contextLength >= 1) {
+            const prevRound = record.context[contextLength - 1];  // 僅對倒數第 2 輪進行
+
+            if (prevRound.q.length > COMPRESSION_TRIGGER_LENGTH) {
+                prevRound.q = await compressTextWithLLM(prevRound.q, COMPRESSION_TARGET_TOKENS.threshold, useModel);
+            }
+
+            if (prevRound.a.length > COMPRESSION_TRIGGER_LENGTH) {
+                prevRound.a = await compressTextWithLLM(prevRound.a, COMPRESSION_TARGET_TOKENS.threshold, useModel);
+            }
+        }
+
+        // 推入最新對話
+        record.context.push(newRound);
+
+    } catch (err) {
+        console.error(`[LOCK ERROR]`, err);  // 處理 timeout 或其他錯誤
+    } finally {
+        // 釋放排隊，準備寫入記憶  
+        memoryManager.queueLockLeave(newGroup);
+        console.info(`[INFO] \`(total time: ${Date.now() - startTime} ms)\``);
+    }
 
     // 更新記憶
     memoryManager.setMemory(userId, record);
@@ -570,7 +608,7 @@ export const replyAsk = async (message, messageId) => {
             memoryManager.setMessageOwner(currentFollowUp.id, userId);
         }
     }
-}
+};
 
 // 調試記憶體內容
 export const replyMemory = async (interaction) => {
@@ -671,7 +709,7 @@ const askLLM = async (query, model) => {
     }
 
     return answer;
-}
+};
 
 // 搜尋網路參考
 const searchGoogle = async (query) => {
@@ -697,7 +735,7 @@ const searchGoogle = async (query) => {
         console.error('[ERROR] 搜尋時發生錯誤：', error);
         return '搜尋時發生錯誤，請稍後再試。';
     }
-}
+};
 
 // 組合完整 prompt
 const composeFullPrompt = async (userId, currentQuestion, searchSummary = "") => {

@@ -417,8 +417,6 @@ client.on("messageCreate", async (message) => {
 
             // 加入或建立話題群組
             replyAsk(message, repliedMessage.id);
-
-            console.info(`[INFO] ${message.author.tag}>reply bot 訊息: ${repliedMessage.id}`);
         } catch (err) {
             console.error(`[ERROR] 取得被回覆訊息時失敗：`, err);
         }

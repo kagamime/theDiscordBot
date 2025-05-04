@@ -10,6 +10,8 @@ console.log("___________________________________");
 
 //#region 環境初始化
 
+let isStoppingBot = false;
+
 // 建立 Discord client 實例
 const client = new Client({
     intents: [
@@ -21,43 +23,41 @@ const client = new Client({
 
 // 初始化 Express Web
 const app = express();
+const router = express.Router();
 
 // 中介處理
 app.use((req, res, next) => {
-    // !stopTheDiscordBot 則返回空響應，不處理請求
-    if (isStoppingBot) {
-        console.info("[INFO]已停止服務，拒絕請求");
-        return res.status(204).end();
-    }
+    if (isStoppingBot) return res.status(204).end();  // 進入假眠
 
     // 收到 cron-job 定時請求
     if (req.headers['the-cron-job'] === 'true') {
         if (process.env.DEBUG_CRONJOB_CONNECT === "true") {
-            console.info(`[INFO]收到請求：${req.method} cron-job.org`);
+            console.info(`[INFO] 收到請求：${req.method} cron-job.org`);
         }
     } else {
-        console.info(`[INFO]收到請求：${req.method} ${req.originalUrl}`);
+        console.info(`[INFO] 收到請求：${req.method} ${req.originalUrl}`);
     }
     next();
 });
 
 // 設定首頁 Router
-app.get("/", (req, res) => {
+router.get("/", (req, res) => {
     res.send("サポちゃん大地に立つ!!");
 });
+app.use("/", router);
 
 // 啟動 Web 伺服器
 const port = process.env.PORT || 3000;
 app.listen(port, () => {
-    console.info(`[INFO]Web Server 正在埠 ${port} 運行`);
+    console.info(`[INFO] Web Server 正在埠 ${port} 運行`);
 });
 
 // 錯誤事件處理
 app.on('error', (error) => {
-    console.error('[ERROR]Express 伺服器錯誤：', error);
+    console.error('[ERROR] Express 伺服器錯誤：', error);
 });
 client.on('error', (error) => {
-    console.error('[ERROR]Discord Client 發生錯誤：', error); ////send log 長度問題??
+    console.error('[ERROR] Discord Client 發生錯誤：', error); ////send log 長度問題??
 });
 
 // 重寫 console.log，使其同時發送到 Discord
@@ -104,7 +104,7 @@ client.once("ready", async () => {
 
         // Slash Command 註冊開關
         if (process.env.REGISTER_COMMANDS === "true") {
-            console.info("[INFO]刪除舊命令並註冊新命令...");
+            console.info("[INFO] 刪除舊命令並註冊新命令...");
 
             const guildIds = process.env.GUILD_IDS.split(',').map(id => id.trim());
             for (const guildId of guildIds) {
@@ -125,11 +125,11 @@ client.once("ready", async () => {
                             command.id,
                         ),
                     );
-                    console.info("[INFO]刪除舊命令：" + command.id);
+                    console.info("[INFO] 刪除舊命令：" + command.id);
                 }
 
                 // 註冊新的命令
-                console.info("[INFO]註冊新命令...");
+                console.info("[INFO] 註冊新命令...");
                 await rest.put(
                     Routes.applicationGuildCommands(
                         process.env.CLIENT_ID,
@@ -140,24 +140,22 @@ client.once("ready", async () => {
                     },
                 );
             }
-            console.info("[INFO]Slash Commands 重新註冊成功");
+            console.info("[INFO] Slash Commands 重新註冊成功");
         } else {
-            console.info("[INFO]Slash Commands 已註冊");
+            console.info("[INFO] Slash Commands 已註冊");
         }
     } catch (error) {
-        console.error("[ERROR]重註冊 Slash Command 發生例外：", error);
+        console.error("[ERROR] 重註冊 Slash Command 發生例外：", error);
     }
 
-    console.info(`[INFO]✅ 已登入為 ${client.user.tag}`);
+    console.info(`[INFO] ✅ 已登入為 ${client.user.tag}`);
 });
 
 // 監聽 SIGTERM 訊號（Render 停止服務時會發送此信號）
-let isStoppingBot = false;
 process.on('SIGTERM', async () => {
-    // !stopTheDiscordBot 則跳過重啟
-    if (isStoppingBot) return;
+    if (isStoppingBot) return;  // 跳過重啟
 
-    console.info('[INFO]已收到 SIGTERM 訊號，正在開始重啟程序...');
+    console.info('[INFO] 已收到 SIGTERM 訊號，正在開始重啟程序...');
 
     try {
         const response = await fetch(process.env.DEPLOY_HOOK_URL, {
@@ -167,16 +165,31 @@ process.on('SIGTERM', async () => {
         });
 
         if (response.ok) {
-            console.info('[INFO]成功觸發部署');
+            console.info('[INFO] 成功觸發部署');
         } else {
-            console.error('[ERROR]觸發部署時出錯');
+            console.error('[ERROR] 觸發部署時出錯');
         }
     } catch (err) {
-        console.error('[ERROR]無法觸發部署', err);
+        console.error('[ERROR] 無法觸發部署', err);
     }
 
     return;
 });
+
+function stopTheDiscordBot() {
+    isStoppingBot = true;
+    console.info("[INFO] 🔴 theDiscordBot 停止中...");
+
+    // 關閉 Web 伺服器
+    router.stack = [];
+    console.log("[INFO] Web Router 已關閉");
+
+    // 停止 Discord Bot
+    client.destroy(() => {
+        console.info("[INFO] Discord 已離線");
+    });
+}
+
 //#endregion
 
 //#region Slash Command
@@ -230,8 +243,7 @@ const theCommands = [
 
 // 監聽 Slash Command
 client.on("interactionCreate", async (interaction) => {
-    // !stopTheDiscordBot 後進入假眠
-    if (isStoppingBot) return;
+    if (isStoppingBot) return;  // 進入假眠
 
     // Autocomplete 提示邏輯
     if (interaction.isAutocomplete()) {
@@ -307,7 +319,7 @@ client.on("interactionCreate", async (interaction) => {
         switch (option) {
             case "__replymemory__":
                 await replyMemory(interaction);
-                console.info(`[GET]${interaction.user.tag}> 調試記憶體內容`);
+                console.info(`[GET] ${interaction.user.tag}> 調試記憶體內容`);
                 break;
             case "__cronjobconnectlog__":
                 // 切換顯示 Cron-Job 連線 Log
@@ -316,7 +328,7 @@ client.on("interactionCreate", async (interaction) => {
                     content: process.env.DEBUG_CRONJOB_CONNECT === "true" ? "已開啟 Cron-Job 連線 Log" : "已關閉 Cron-Job 連線 Log",
                     flags: 64,
                 });
-                console.info(`[SET]${process.env.DEBUG_CRONJOB_CONNECT === "true" ? "已開啟 Cron-Job 連線 Log" : "已關閉 Cron-Job 連線 Log"}`);
+                console.info(`[SET] ${process.env.DEBUG_CRONJOB_CONNECT === "true" ? "已開啟 Cron-Job 連線 Log" : "已關閉 Cron-Job 連線 Log"}`);
                 break;
             case "__fullpromptlog__":
                 // 切換顯示上下文 Debug Log
@@ -325,15 +337,11 @@ client.on("interactionCreate", async (interaction) => {
                     content: process.env.DEBUG_FULLPROMPT === "true" ? "已開啟上下文 Debug Log" : "已關閉上下文 Debug Log",
                     flags: 64,
                 });
-                console.info(`[SET]${process.env.DEBUG_FULLPROMPT === "true" ? "已開啟上下文 Debug Log" : "已關閉上下文 Debug Log"}`);
+                console.info(`[SET] ${process.env.DEBUG_FULLPROMPT === "true" ? "已開啟上下文 Debug Log" : "已關閉上下文 Debug Log"}`);
                 break;
             case "__stopthediscordbot__":
-                isStoppingBot = 'true';
                 await interaction.reply({ content: "おやすみなさい．．．", flags: 64, });
-                console.info("[INFO]🔴 theDiscordBot 停止中...");
-                client.destroy(() => {  ////為何沒作用
-                    console.info("[INFO]Discord 已離線");
-                }); // 停止 Discord Bot
+                stopTheDiscordBot();
                 break;
             default:
                 await interaction.reply({
@@ -348,7 +356,7 @@ client.on("interactionCreate", async (interaction) => {
 
     // /help
     if (interaction.commandName === "help") {
-        console.log(`[REPLY]${interaction.user.tag}> 觸發了 /help`);
+        console.log(`[REPLY] ${interaction.user.tag}> 觸發了 /help`);
         await slashHelp(interaction);
         return;
     }
@@ -393,7 +401,7 @@ client.on("interactionCreate", async (interaction) => {
 
 // 監聽 Keywords
 client.on("messageCreate", async (message) => {
-    if (isStoppingBot) return;       // !stopTheDiscordBot 後進入假眠
+    if (isStoppingBot) return;       // 進入假眠
     if (message.author.bot) return;  // 忽略 Bot 自己的訊息
 
     const content = message.content;
@@ -410,9 +418,9 @@ client.on("messageCreate", async (message) => {
             // 加入或建立話題群組
             replyAsk(message, repliedMessage.id);
 
-            console.info(`[INFO]]${message.author.tag}>reply bot 訊息: ${repliedMessage.id}`);
+            console.info(`[INFO] ${message.author.tag}>reply bot 訊息: ${repliedMessage.id}`);
         } catch (err) {
-            console.error(`[ERROR]取得被回覆訊息時失敗：`, err);
+            console.error(`[ERROR] 取得被回覆訊息時失敗：`, err);
         }
     }
 
@@ -421,14 +429,8 @@ client.on("messageCreate", async (message) => {
     if (message.member.roles.cache.some(role => adminRoleIds.includes(role.id))) {
         // 捕獲中止命令 !stopTheDiscordBot
         if (content.includes("!stopTheDiscordBot")) {
-            isStoppingBot = 'true';
-            console.info("[INFO]執行 !stopTheDiscordBot");
             await message.reply("おやすみなさい。");
-            console.info("[INFO]🔴 theDiscordBot 停止中...");
-            client.destroy(() => {
-                console.info("[INFO]Discord 已離線");
-            }); // 停止 Discord Bot
-
+            stopTheDiscordBot();
             return; // 不用 process.exit(0) 會被render重啟
         }
 
@@ -441,7 +443,7 @@ client.on("messageCreate", async (message) => {
     if (shouldHandle(content, "!time")) {
         const result = await theTimestamp(content);
         await message.reply(result);
-        console.log(`[REPLY]${message.author.tag}> ${result}`);
+        console.log(`[REPLY] ${message.author.tag}> ${result}`);
     }
 
     if (shouldHandle(content, "!roll")) {

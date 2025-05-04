@@ -42,7 +42,7 @@ let useModel = null;  // 記錄當前可用 model
 
 // 常數相依性檢查
 if (SUMMARY_ROUND_COUNT >= MAX_CONTEXT_ROUND) {
-    throw new Error(`[ERROR]SUMMARY_ROUND_COUNT (${SUMMARY_ROUND_COUNT}) 必須小於 MAX_CONTEXT_ROUND (${MAX_CONTEXT_ROUND})`);
+    throw new Error(`[ERROR] SUMMARY_ROUND_COUNT (${SUMMARY_ROUND_COUNT}) 必須小於 MAX_CONTEXT_ROUND (${MAX_CONTEXT_ROUND})`);
 }
 
 class MemoryManager {
@@ -189,11 +189,11 @@ class MemoryManager {
     // 取得對話訊息的擁有者
     getMessageOwner(messageId) {
         if (!this.messageOwner) {
-            console.error(`[ERROR]messageOwner未建立`);
+            console.error(`[ERROR] messageOwner未建立`);
             return null;
         }
         if (!this.messageOwner.has(messageId)) {
-            console.warn(`[WARN]找不到訊息ID: ${messageId} 擁有者`);
+            console.warn(`[WARN] 找不到訊息ID: ${messageId} 擁有者`);
             return null;
         }
         return this.messageOwner.get(messageId);
@@ -334,13 +334,13 @@ export const setAsk = async (interaction, content) => {
 
     if (!content || !content.trim()) {
         if (preset) {
-            console.info(`[GET]${userTag}>查詢前提：${preset}`);
+            console.info(`[GET] ${userTag}>查詢前提：${preset}`);
             await interaction.editReply({
                 content: `\`目前的對話前提：\`\n>>> ${preset}`,
                 flags: 64,
             });
         } else {
-            console.info(`[GET]${userTag}>查詢前提：（尚未設定）`);
+            console.info(`[GET] ${userTag}>查詢前提：（尚未設定）`);
             await interaction.editReply({
                 content: `\`目前還沒有對話前提！！\``,
                 flags: 64,
@@ -352,7 +352,7 @@ export const setAsk = async (interaction, content) => {
     // 有傳入內容，設定新的前提
     preset = content.trim();
     memoryManager.setUserPreset(userId, preset);
-    console.info(`[SET]${userTag}>設定前提：${preset}`);
+    console.info(`[SET] ${userTag}>設定前提：${preset}`);
     await interaction.editReply({
         content: `\`已設定對話前提！！\`\n>>> ${preset}`,
         flags: 64,
@@ -364,7 +364,7 @@ export const clsAsk = async (interaction) => {
     await interaction.deferReply({ flags: 64 });  // 告知 Discord 延遲回應，且回應為隱藏
     memoryManager.removeUserFromGroup(interaction.user.id);
     memoryManager.userMemory.delete(interaction.user.id);
-    console.info(`[SET]${interaction.user.tag}>清除前提記憶`);
+    console.info(`[SET] ${interaction.user.tag}>清除前提記憶`);
     await interaction.editReply(`\`已清除對話前提與記憶！！\``);
 };
 
@@ -401,10 +401,10 @@ export const slashAsk = async (interaction, query, selectedModel) => {
                     record.summary = memoryManager.cloneRecord().summary;
                     memoryManager.setMemory(userId, record);
                 }
-                console.info(`[SET]${userTag}>主題變更，清除記憶：`);
+                console.info(`[SET] ${userTag}>主題變更，清除記憶：`);
             }
         } catch (err) {
-            console.warn(`[WARN]主題判斷失敗：${err.message}`);
+            console.warn(`[WARN] 主題判斷失敗：${err.message}`);
             // 為保險仍保留記憶
         }
     }
@@ -430,7 +430,7 @@ export const slashAsk = async (interaction, query, selectedModel) => {
         fallbackNotice = `\`${MODEL_OPTIONS[selectedModel].name} 沒回應\``;
     }
     console.log(
-        `[REPLY]${userTag}> \`/ask\` ${content} - \`${MODEL_OPTIONS[selectedModel].name}\`` +
+        `[REPLY] ${userTag}> \`/ask\` ${content} - \`${MODEL_OPTIONS[selectedModel].name}\`` +
         (useModel !== selectedModel
             ? ` -> \`${MODEL_OPTIONS[useModel].name}\``
             : '')
@@ -656,17 +656,17 @@ const askLLM = async (query, model) => {
             if (typeof answer === 'string' && answer.trim()) {
                 break;  // 找到有效回應後跳出循環
             } else {
-                console.warn(`[WARN]\`${MODEL_OPTIONS[key].name}\`回應無效，嘗試下一個模型`);
+                console.warn(`[WARN] \`${MODEL_OPTIONS[key].name}\`回應無效，嘗試下一個模型`);
             }
         } catch (err) {
-            console.error(`[ERROR]執行 ${MODEL_OPTIONS[key].name} 時發生錯誤:`, err);
+            console.error(`[ERROR] 執行 ${MODEL_OPTIONS[key].name} 時發生錯誤:`, err);
         }
 
         triedModels++;
     }
 
     if (!answer) {
-        console.error(`[ERROR]模型皆無回應`);
+        console.error(`[ERROR] 模型皆無回應`);
         return null;
     }
 
@@ -694,7 +694,7 @@ const searchGoogle = async (query) => {
         // 限制搜尋結果篇幅
         return splitDiscordMessage(summary, MAX_SEARCH_SUMMARY_LENGTH)[0];
     } catch (error) {
-        console.error('[ERROR]搜尋時發生錯誤：', error);
+        console.error('[ERROR] 搜尋時發生錯誤：', error);
         return '搜尋時發生錯誤，請稍後再試。';
     }
 }
@@ -704,8 +704,8 @@ const composeFullPrompt = async (userId, currentQuestion, searchSummary = "") =>
     const record = memoryManager.getMemory(userId);
     const { preset, context, summary } = record;
 
-    // （你是一個 Discord 助手。請簡潔地回應，並遵循使用者的前提或指示。以下所有對話都是你與使用者之間的交流。配合使用者的語言回答；若為中文，請使用繁體中文。）
-    const instruction = "(You are a Discord assistant. Respond concisely and follow user's premise or instructions. All dialogue below is between you and the user. Always answer in the user's language. If Chinese, use Traditional Chinese.)";
+    // （你是一個 Discord 助理。簡潔地回應並遵循使用者的前提或指示。所有對話皆為你與使用者之間的互動。使用使用者的語言；若為中文則使用繁體中文。）
+    const instruction = "(You are a Discord assistant. Respond concisely and follow the user's premise or instructions. All dialogue is between you and the user. Use the user's language; use Traditional Chinese if it's Chinese.)";
     const formattedSummary = summary ? `[Summary]\n${summary}` : "";
     const formattedContext = context.length > 0
         ? `[History]\n` +
@@ -723,7 +723,7 @@ const composeFullPrompt = async (userId, currentQuestion, searchSummary = "") =>
     ].filter(Boolean).join("\n\n");
 
     if (process.env.DEBUG_FULLPROMPT === "true") {
-        console.log(`[DEBUG]\`${userId}\`>組合上下文：\n${fullPrompt}`);
+        console.log(`[DEBUG] \`${userId}\`>組合上下文：\n${fullPrompt}`);
     }
     return fullPrompt;
 };
@@ -782,7 +782,7 @@ async function askGemini(prompt, modelConfig) {
 
     if (!response.ok) {
         const errorText = await response.text();
-        console.error(`[ERROR]askGemini Error: ${response.status} ${response.statusText}\n${errorText}`);
+        console.error(`[ERROR] askGemini Error: ${response.status} ${response.statusText}\n${errorText}`);
         return '';  // 空回應
     }
 
@@ -813,7 +813,7 @@ async function askOpenrouter(prompt, modelConfig) {
 
     if (!response.ok) {
         const errorText = await response.text();
-        console.error(`[ERROR]askOpenrouter Error: ${response.status} ${response.statusText}\n${errorText}`);
+        console.error(`[ERROR] askOpenrouter Error: ${response.status} ${response.statusText}\n${errorText}`);
         return '';  // 空回應
     }
 

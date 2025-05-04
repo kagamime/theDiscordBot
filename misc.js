@@ -50,7 +50,6 @@ class RollDice {
             // 擲骰處理
             let match;
             while ((match = regex.exec(content)) !== null) {
-                console.log("[debug]" + match);
                 result += handler.call(this, match) + '\n';
             }
         }
@@ -63,7 +62,7 @@ class RollDice {
 
         await message.reply({ embeds: [embed] });
 
-        console.log(`[REPLY]${message.author.tag}> ${content}`);
+        console.log(`[REPLY] ${message.author.tag}> ${content}`);
     }
 
     // 基本骰、複合骰、加減運算

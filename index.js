@@ -1,6 +1,6 @@
 import { Client, GatewayIntentBits, REST, Routes } from "discord.js";
 import { MODEL_OPTIONS, setAsk, clsAsk, slashAsk, replyAsk, replyMemory, handleMsgOwner } from "./askHandler.js";
-import { theTimestamp } from "./timestamp.js";
+import { theTimestamp, ZONE_OPTIONS } from "./timestamp.js";
 import { slashHelp, theRollDice } from "./misc.js";
 import express from "express";
 import dotenv from "dotenv";
@@ -239,6 +239,34 @@ const theCommands = [
             },
         ],
     },
+    {
+        name: "time",
+        description: "サポちゃん可以幫忙計算時間跟時區轉換！！",
+        dm_permission: false,
+        type: 1,
+        options: [
+            {
+                name: "時間",
+                description: "輸入指定時間或時間差，開頭！表示填入值為當地時區",
+                type: 3,
+                required: false,
+            },
+            {
+                name: "時區",
+                description: "選擇時區或直接填入UTC",
+                type: 3,
+                required: false,
+                autocomplete: true,
+            },
+            {
+                name: "顯隱",
+                description: "顯示或隱藏查詢的目標時間",
+                type: 3,
+                required: false,
+                autocomplete: true,
+            },
+        ],
+    },
 ];
 
 // 監聽 Slash Command
@@ -287,7 +315,7 @@ client.on("interactionCreate", async (interaction) => {
                 if (!isQuery) {
                     const modelChoices = Object.entries(MODEL_OPTIONS)  // 定義在 askHandler.js 內
                         .map(([key, value]) => ({
-                            name: `${value.name}：${value.description}`, // 顯示在選單上的文字
+                            name: `${value.name}：${value.description}`,  // 顯示在選單上的文字
                             value: key, // 實際傳到指令處理器的值
                         }))
                         .filter(choice => choice.name.toLowerCase().includes(focused.toLowerCase()));
@@ -295,6 +323,28 @@ client.on("interactionCreate", async (interaction) => {
                 } else {
                     await interaction.respond([]);
                 }
+                return;
+            }
+        }
+
+        if (interaction.commandName === "time") {
+            if (focusedOption.name === "時區") {
+                const zoneChoices = Object.entries(ZONE_OPTIONS)  // 定義在 timestamp.js 內
+                    .map(([key, value]) => ({
+                        name: `${value.country}(${value.label})`,
+                        value: key,
+                    }))
+                    .filter(choice => choice.name.toLowerCase().includes(focused.toLowerCase()));
+                await interaction.respond(zoneChoices.slice(0, 25));
+                return;
+            }
+            if (focusedOption.name === "顯隱") {
+                const choices = [
+                    { name: "顯示", value: "__show__" },
+                    { name: "隱藏", value: "__hide__" },
+                ];
+                const filtered = choices.filter(choice => choice.name.startsWith(focused));
+                await interaction.respond(filtered);
                 return;
             }
         }
@@ -392,6 +442,12 @@ client.on("interactionCreate", async (interaction) => {
             default:  // 詢問內容
                 await slashAsk(interaction, query, addendum);
         }
+        return;
+    }
+
+    // /time
+    if (interaction.commandName === "time") {
+        ////
         return;
     }
 });

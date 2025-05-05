@@ -1,5 +1,7 @@
 import moment from "moment-timezone";
 
+//#region OLD
+
 const rules = [
     [/!time([+-]\d+(\.\d+)?)(h|m|d)?([fr])?(!)?/i, parseOffsetTimeCommand], //!time+1.5hF
     [/!time(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(TW|JP|SE)?(r)?(!)?/i, parseFixedTimeCommand], //!timeYYYYMMDDHHmmTW
@@ -73,3 +75,38 @@ function parseTimestampCommand(content, match) {
     const now = Math.floor(Date.now() / 1000);
     return content.replace(match[0], match[1] ? `\`<t:${now}:t>\`` : `<t:${now}:t>`);
 }
+//#endregion
+
+// 時區清單，鍵名作為 enum 選項值
+export const ZONE_OPTIONS = {
+    TW: {
+        country: '台灣',
+        label: 'tw',
+        timezone: 'Asia/Taipei',
+    },
+    JP: {
+        country: '日本',
+        label: 'jp',
+        timezone: 'Asia/Tokyo',
+    },
+    SE: {
+        country: '瑞典',
+        label: 'se',
+        timezone: 'Europe/Stockholm',
+    },
+    GB: {
+        country: '英國',
+        label: 'uk',
+        timezone: 'Europe/London',
+    },
+    US_E: {
+        country: '美東',
+        label: 'us-e',
+        timezone: 'America/New_York',
+    },
+    US_W: {
+        country: '美西',
+        label: 'us-w',
+        timezone: 'America/Los_Angeles',
+    },
+};

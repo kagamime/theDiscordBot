@@ -10,7 +10,9 @@ console.log("___________________________________");
 
 //#region 環境初始化
 
+const procId = Date.now().toString().slice(-4);
 let isStoppingBot = false;
+let isCronJobPing = false;
 
 // 建立 Discord client 實例
 const client = new Client({
@@ -23,14 +25,17 @@ const client = new Client({
 
 // 初始化 Express Web
 const app = express();
-const router = express.Router();
 
 // 中介處理
 app.use((req, res, next) => {
-    if (isStoppingBot) return res.status(204).end();  // 進入假眠
+    if (isStoppingBot) return res.status(403).end();  // 進入假眠，回應403
 
     // 收到 cron-job 定時請求
     if (req.headers['the-cron-job'] === 'true') {
+        if (!isCronJobPing) {
+            isCronJobPing = true;
+            console.info(`[INFO] 確認 cron-job 請求，重啟機制就緒`);
+        }
         if (process.env.DEBUG_CRONJOB_CONNECT === "true") {
             console.info(`[INFO] 收到請求：${req.method} cron-job.org`);
         }
@@ -41,10 +46,9 @@ app.use((req, res, next) => {
 });
 
 // 設定首頁 Router
-router.get("/", (req, res) => {
+app.get("/", (req, res) => {
     res.send("サポちゃん大地に立つ!!");
 });
-app.use("/", router);
 
 // 啟動 Web 伺服器
 const port = process.env.PORT || 3000;
@@ -60,7 +64,7 @@ client.on('error', (error) => {
     console.error('[ERROR] Discord Client 發生錯誤：', error); ////send log 長度問題??
 });
 
-// 重寫 console.log，使其同時發送到 Discord
+// 覆寫 console.log，使其同時發送到 Discord
 const overrideConsole = (type) => {
     const original = console[type];
 
@@ -148,46 +152,46 @@ client.once("ready", async () => {
         console.error("[ERROR] 重註冊 Slash Command 發生例外：", error);
     }
 
-    console.info(`[INFO] ✅ 已登入為 ${client.user.tag}`);
+    console.info(`[INFO] ✅ theDiscordBot\`(${procId})\` 已啟動，登入為 ${client.user.tag}`);
 });
 
 // 監聽 SIGTERM 訊號（Render 停止服務時會發送此信號）
 process.on('SIGTERM', async () => {
-    if (isStoppingBot) return;  // 跳過重啟
+    console.info(`[INFO] 已收到 SIGTERM 訊號，準備結束 theDiscordBot\`(${procId})\``);
 
-    console.info('[INFO] 已收到 SIGTERM 訊號，正在開始重啟程序...');
+    // 當接收過 cron-job ping 之後或SIGTERM_REDEPLOY才啟用重啟機制
+    if (isCronJobPing || process.env.SIGTERM_REDEPLOY === 'true') {
+        console.info('[INFO] 正在重啟部署...');
+        try {
+            const response = await fetch(process.env.DEPLOY_HOOK_URL, {
+                method: 'POST',  // HTTP 方法
+                headers: { 'Content-Type': 'application/json' },  // 如果需要的話，可以添加 header
+                body: JSON.stringify({ message: "Deploy triggered by SIGTERM" })  // 如果需要的話，可以傳送資料
+            });
 
-    try {
-        const response = await fetch(process.env.DEPLOY_HOOK_URL, {
-            method: 'POST',  // HTTP 方法
-            headers: { 'Content-Type': 'application/json' },  // 如果需要的話，可以添加 header
-            body: JSON.stringify({ message: "Deploy triggered by SIGTERM" })  // 如果需要的話，可以傳送資料
-        });
-
-        if (response.ok) {
-            console.info('[INFO] 成功觸發部署');
-        } else {
-            console.error('[ERROR] 觸發部署時出錯');
+            if (response.ok) {
+                console.info('[INFO] 成功觸發部署');
+            } else {
+                console.error('[ERROR] 觸發部署時出錯');
+            }
+        } catch (err) {
+            console.error('[ERROR] 無法觸發部署', err);
         }
-    } catch (err) {
-        console.error('[ERROR] 無法觸發部署', err);
     }
 
     return;
 });
 
+// 於 Render 上進入假眠
 function stopTheDiscordBot() {
-    isStoppingBot = true;
-    console.info("[INFO] 🔴 theDiscordBot 停止中...");
+    console.info(`[INFO] 🔴 theDiscordBot\`(${procId})\` 停止中...`);
 
-    // 關閉 Web 伺服器
-    router.stack = [];
-    console.log("[INFO] Web Router 已關閉");
+    isStoppingBot = true;
+    isCronJobPing = false;
 
     // 停止 Discord Bot
-    client.destroy(() => {
-        console.info("[INFO] Discord 已離線");
-    });
+    console.info("[INFO] Discord 已離線");
+    client.destroy();
 }
 
 //#endregion

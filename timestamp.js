@@ -86,7 +86,7 @@ export function theTimestamp(interaction, timeInput, zoneInput, visibility) {
         result = formatResult(
             Math.floor(Date.now() / 1000),
             zoneSetKey,
-            zoneUserKey,
+            zoneInput,
             visibility
         );
     }
@@ -95,7 +95,7 @@ export function theTimestamp(interaction, timeInput, zoneInput, visibility) {
         result = formatResult(
             parseRelativeTime(timeInput),
             zoneSetKey,
-            zoneUserKey,
+            zoneInput,
             visibility
         );
     }
@@ -114,7 +114,7 @@ export function theTimestamp(interaction, timeInput, zoneInput, visibility) {
     }
 
     // 設定回傳的 Embed
-    console.log(`[REPLY] ${interaction.user.tag}> \`/time\` timeInput: ${timeInput}, zoneInput: ${zoneInput}, visibility: ${visibility}`);
+    console.log(`[FUNC] ${interaction.user.tag}> \`/time\` timeInput: ${timeInput}, zoneInput: ${zoneInput}, visibility: ${visibility}`);
     const embed = new EmbedBuilder()
         .setColor(0x5865f2)
         .setDescription(result.trim());
@@ -125,8 +125,8 @@ export function theTimestamp(interaction, timeInput, zoneInput, visibility) {
 //#region 子函式
 
 // 格式化顯示結果的函數
-function formatResult(result, zoneSetKey, zoneUserKey, visibility) {
-    if (zoneSetKey === zoneUserKey) {
+function formatResult(result, zoneSetKey, zoneInput, visibility) {
+    if (!zoneInput) {
         return visibility
             ? `<t:${result}:t> - 於<t:${result}:R>`
             : `\`<t:${result}:t>\` -> <t:${result}:t>\n\`<t:${result}:f>\` -> <t:${result}:f>\n\`<t:${result}:R>\` -> <t:${result}:R>`;
@@ -237,6 +237,7 @@ function parseAbsoluteTime(timeInput, zoneSetKey, zoneUserKey, visibility) {
     if (!parsed || !parsed.isValid()) return null;
     const result = Math.floor(parsed.valueOf() / 1000);
 
+    // return (開頭！) ? timestamp : string
     if (inputZoneKey === zoneSetKey) {
         return visibility
             ? `<t:${result}:t> - 於<t:${result}:R>`

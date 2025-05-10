@@ -1,7 +1,7 @@
 import { Client, GatewayIntentBits, REST, Routes } from "discord.js";
 import { MODEL_OPTIONS, setAsk, clsAsk, slashAsk, replyAsk, replyMemory, handleMsgOwner } from "./askHandler.js";
 import { theTimestamp, ZONE_OPTIONS } from "./timestamp.js";
-import { slashHelp, theRollDice } from "./misc.js";
+import { slashHelp, theRoll } from "./misc.js";
 import express from "express";
 import dotenv from "dotenv";
 dotenv.config();
@@ -251,21 +251,21 @@ const theCommands = [
         options: [
             {
                 name: "時間",
-                description: "輸入指定時間或時間差，開頭！表示填入值為當地時區",
+                description: "輸入「指定時間(MM/DD HH:mm)」或「時間差(+1.5h)」可顯示時間戳或換算成「時區」時間，或「！指定時間」可查詢「時區」對應本地時間",
                 type: 3,
                 required: true,
                 autocomplete: true,
             },
             {
                 name: "時區",
-                description: "選擇時區或直接填入UTC",
+                description: "可「選擇時區」或直接填入「UTC」，留空未選預設為「本地時區」",
                 type: 3,
                 required: false,
                 autocomplete: true,
             },
             {
                 name: "顯隱",
-                description: "顯示或隱藏查詢的目標時間",
+                description: "「顯示」或「隱藏」查詢的輸出結果",
                 type: 3,
                 required: false,
                 autocomplete: true,
@@ -416,7 +416,7 @@ client.on("interactionCreate", async (interaction) => {
 
     // /help
     if (interaction.commandName === "help") {
-        console.log(`[REPLY] ${interaction.user.tag}> 觸發了 /help`);
+        console.info(`[GET] ${interaction.user.tag}> 觸發了 \`/help\``);
         await interaction.reply(slashHelp());
         return;
     }
@@ -509,8 +509,9 @@ client.on("messageCreate", async (message) => {
         }
     }
 
+    // 各種骰
     if (shouldHandle(content, "!roll")) {
-        await theRollDice(content, message);
+        await theRoll(content, message);
     }
 });
 

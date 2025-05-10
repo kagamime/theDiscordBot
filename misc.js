@@ -3,25 +3,39 @@ import moment from "moment-timezone";
 
 //#region help
 export function slashHelp() {
-    const formattedTime = moment().format("YYYYMMDDHHmm");
+    const formattedTime = [
+        moment().format("YYYYMMDDHHmm"),
+        moment().format("MMDDHHmm"),
+        moment().format("YYYY/MM/DD HH:mm"),
+        moment().format("MM-DD HH:mm"),
+        moment().format("HH:mm"),
+    ];
 
     const reply = `
 **__/help__** - サポちゃん的支援說明！！
+
 **__/ask__** - 提問！！ サポちゃん會想辦法回答！！
 > **___提問___：直接輸入__問題內容__** - 詢問 AI，可於後方___追記___欄切換使用模型
-> **___提問___：直接輸入__？問題內容__** - 開頭?使用搜尋輔助詢問 AI，可於後方___追記___欄切換使用模型
-> **___提問___：選擇__查詢或設定前提__** - 可於後方___追記___欄更新對話前提，或留空查詢現在前提
-> **___提問___：選擇__清除前提與記憶__** - 清除對話記憶與前提
+> **　　：直接輸入__？問題內容__** - 開頭?使用搜尋輔助詢問 AI，可於後方___追記___欄切換使用模型
+> **　　：選擇__查詢或設定前提__** - 可於後方___追記___欄更新對話前提，或留空查詢現在前提
+> **　　：選擇__清除前提與記憶__** - 清除對話記憶與前提
+> **___追記___：配合__提問__使用** - 可輸入內容會隨__提問__變化
 
-**___!time___**
-> **!time** - 顯示當前時間
-> **!time__+2h__ / !time__-30m__ / !time__+1.5h__** - 計算時間，未輸入單位預設為h
-> **!time+3h__F__ / !time-1d__R__** - F 顯示完整時間，R 顯示倒數時間
-> **!time__TW__** / **!time__JP__** / **!time__SE__** - 顯示指定時區時間（TW=台灣, JP=日本, SE=瑞典）
-> **!time__${formattedTime}__TW / JP / SE**- 轉換指定時區時間
-> **!time...__!__** - 顯示時間戳
-**___!dice___**
-> **!dice__3d6__ / !dice__1d100__** - 擲骰
+**___/time___** - サポちゃん可以幫忙計算時間跟時區轉換！！
+> **___時間___：選「 - 」** - 代表當前時間，或配合__時區__可換算成__時區__時間
+> 　　**：輸入__時間差__** - 計算__相對時間__，或配合__時區__可換算成__時區__時間
+> 　　　可接受如__+1d-1.5h+30m__，單位 __d__, __h__, __m__
+> 　　**：輸入__指定時間__** - 顯示__指定時間__的__時間戳格式__，或配合__時區__可換算成__時區__時間
+> 　　　可接受如__ ${formattedTime[0]}__ / __${formattedTime[1]}__ / __${formattedTime[2]}__ / __${formattedTime[3]}__ / __${formattedTime[4]}__等格式
+> 　　**：輸入__！指定時間__** - 配合__時區__設定，可換算成__本地時間__
+> 　　　可接受如__ ！${formattedTime[0]}__ / __!${formattedTime[1]}__ / __！${formattedTime[2]}__ / __!${formattedTime[3]}__ / __！${formattedTime[4]}__等格式
+> **___時區___：可__選擇時區__或__直接填入UTC__** - 對__時間__的__時區__設定，留空未選預設為__本地時區__
+> **___顯隱___：可選擇__顯示__或__隱藏__** - 可__顯示__換算後時間及倒數，或__隱藏__顯示__時間戳格式__等資訊
+
+**___!roll___**
+> **!roll__3d6__ / !roll__1d3+3__ / !roll__1d100 < 50__** - 擲骰
+> **!roll__ 題目__** - 抽選
+> **__!roll__** - 原題重抽 (如果有)
 `;
 
     return { content: reply, flags: 64 };
@@ -29,16 +43,66 @@ export function slashHelp() {
 //#endregion
 
 //#region 擲骰功能
-class RollDice {
+class RollSomething {
     constructor() {
         this.rules = [
             [/!roll(?!.*[<>])\s*(\d+d\d+(?:\s*[\+-]\s*\d+d\d+)*(?:\s*[\+-]\s*\d+)?)/gi, this._handleCompositeDice],  // 基本骰、複合骰、加減運算
             [/!roll\s*(\d+)\s*d\s*(\d+)\s*([<>])\s*(\d+)/gi, this._handleSuccessDice],  // 成功/失敗判定骰
         ];
+        this.rollRecord = '';
     }
 
-    // !rollXdY 主函式
+    // 主函式
     async roll(content, message) {
+        // 如果是擲骰
+        const tryRollDice = this._rollDice(content, message);
+        if (tryRollDice) {
+            return await message.reply(tryRollDice);
+        }
+        // 如果是重骰
+        else if (content.trim() === '!roll' && this.rollRecord !== '') {
+            console.log(`[FUNC] ${message.author.tag}> \`!roll\``);
+            return await this._handleChoiceRoll(this.rollRecord.trim().split('\n'), message);
+        }
+        // 如果是抉擇
+        else {
+            const lines = content.trim().split('\n');
+            if (/^!roll\s+\S/.test(lines[0]) && lines.length > 0) {
+                return await this._handleChoiceRoll(lines, message);
+            }
+        }
+    }
+
+    async _handleChoiceRoll(lines, message) {
+        const title = lines[0].slice(5).trim(); // 去掉 "!roll "
+        const options = lines.slice(1).filter(line => line.trim());
+        if (!title || options.length < 2) {
+            await message.reply('請輸入題目，並提供至少兩個選項！！ 範例：\n\`!roll 午餐吃啥\n麵\n飯\`');
+            return;
+        }
+
+        const shuffled = options.sort(() => Math.random() - 0.5);
+        const intro = `\` ${title}？？ 遇事不決，サポちゃん幫你骰一個！！ \``;
+        this.rollRecord = `!roll ${title}`;
+
+        let content = intro;
+        const sent = await message.reply(content);
+
+        let delay = 2000;
+        let count = 1;
+        for (const option of shuffled) {
+            await new Promise(res => setTimeout(res, delay));
+            content += `\n> ${count++}. ${option}！！`;
+            this.rollRecord += `\n${option}`;
+            await sent.edit(content);
+            delay = Math.max(delay / 2, 100); // 不小於 100ms
+        }
+        console.log(`[FUNC] ${message.author.tag}> \`!roll\` ${lines[0]}`);
+    }
+
+
+    // !rollXdY
+    _rollDice(content, message) {
         let replacedContent = content.split('\n').map(line => '> ' + line).join('\n') + "\n\n";
         let result = '';
         for (const [regex, handler] of this.rules) {
@@ -58,9 +122,8 @@ class RollDice {
             .setColor(0x5865f2)
             .setDescription(replacedContent + result.trim());
 
-        await message.reply({ embeds: [embed] });
-
-        console.log(`[REPLY] ${message.author.tag}> ${content}`);
+        console.log(`[FUNC] ${message.author.tag}> ${content}`);
+        return { embeds: [embed] };
     }
 
     // 基本骰、複合骰、加減運算
@@ -134,6 +197,6 @@ class RollDice {
     }
 }
 // 導出roll方法
-const rollDice = new RollDice();
-export const theRollDice = rollDice.roll.bind(rollDice);
+const rollSomething = new RollSomething();
+export const theRoll = rollSomething.roll.bind(rollSomething);
 //#endregion

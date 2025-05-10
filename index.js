@@ -253,7 +253,8 @@ const theCommands = [
                 name: "時間",
                 description: "輸入指定時間或時間差，開頭！表示填入值為當地時區",
                 type: 3,
-                required: false,
+                required: true,
+                autocomplete: true,
             },
             {
                 name: "時區",
@@ -273,91 +274,96 @@ const theCommands = [
     },
 ];
 
+// 定義 Autocomplete 提示列表
+const autocompleteHandlers = {
+    control: {
+        options: async (focused) => {
+            const choices = [
+                { name: "調試記憶體內容", value: "__replymemory__" },
+                {
+                    name: process.env.DEBUG_CRONJOB_CONNECT === "false"
+                        ? "開啟 Cron-Job 連線 Log"
+                        : "關閉 Cron-Job 連線 Log",
+                    value: "__cronjobconnectlog__"
+                },
+                {
+                    name: process.env.DEBUG_FULLPROMPT === "false"
+                        ? "開啟上下文 Debug Log"
+                        : "關閉上下文 Debug Log",
+                    value: "__fullpromptlog__"
+                },
+                { name: "終止執行 theDiscordBot", value: "__stopthediscordbot__" },
+            ];
+            return choices.filter(c => c.name.startsWith(focused));
+        }
+    },
+    ask: {
+        提問: async (focused) => {
+            return [
+                { name: "查詢或設定前提 → 可於後方追記欄輸入對話前提", value: "__setask__" },
+                { name: "清除前提與記憶", value: "__clsask__" }
+            ].filter(c => c.name.startsWith(focused));
+        },
+        追記: async (focused, interaction) => {
+            const query = interaction.options.get("提問")?.value;
+            const isQuery = ["__setask__", "__clsask__"].includes(query);
+            if (isQuery) return [];               // 不在提問選項內時才提供模型選項
+            return Object.entries(MODEL_OPTIONS)  // 定義在 askHandler.js 內
+                .map(([key, value]) => ({
+                    name: `${value.name}：${value.description}`,  // 顯示在選單上的文字
+                    value: key                                    // 實際傳到指令處理器的值
+                }))
+                .filter(c => c.name.toLowerCase().includes(focused.toLowerCase()))
+                .slice(0, 25);  // Discord 限制最多 25 筆
+        }
+    },
+    time: {
+        時間: async (focused) => {
+            return [{ name: "-", value: "__now__" }].filter(c => c.name.startsWith(focused));
+        },
+        時區: async (focused) => {
+            return Object.entries(ZONE_OPTIONS)  // 定義在 timestamp.js 內
+                .map(([key, value]) => ({
+                    name: `${value.country}(${value.label})`,
+                    value: key
+                }))
+                .filter(c => c.name.toLowerCase().includes(focused.toLowerCase()))
+                .slice(0, 25);
+        },
+        顯隱: async (focused) => {
+            return [
+                { name: "顯示", value: "__show__" },
+                { name: "隱藏", value: "__hide__" }
+            ].filter(c => c.name.startsWith(focused));
+        }
+    }
+};
+
 // 監聽 Slash Command
 client.on("interactionCreate", async (interaction) => {
     if (isStoppingBot) return;  // 進入假眠
 
     // Autocomplete 提示邏輯
     if (interaction.isAutocomplete()) {
-        const focused = interaction.options.getFocused();
+        const { commandName } = interaction;
         const focusedOption = interaction.options.getFocused(true);
+        const focused = focusedOption.value;
 
-        if (interaction.commandName === "control" && focusedOption.name === "options") {
-            const choices = [
-                { name: "調試記憶體內容", value: "__replymemory__" },
-                {
-                    name: process.env.DEBUG_CRONJOB_CONNECT === "false" ? "開啟 Cron-Job 連線 Log" : "關閉 Cron-Job 連線 Log",
-                    value: "__cronjobconnectlog__"
-                },
-                {
-                    name: process.env.DEBUG_FULLPROMPT === "false" ? "開啟上下文 Debug Log" : "關閉上下文 Debug Log",
-                    value: "__fullpromptlog__"
-                },
-                { name: "終止執行 theDiscordBot", value: "__stopthediscordbot__" },
-            ];
-            const filtered = choices.filter(choice => choice.name.startsWith(focused));
-            await interaction.respond(filtered);
-            return;
-        }
-
-        if (interaction.commandName === "ask") {
-            if (focusedOption.name === "提問") {
-                const choices = [
-                    { name: "查詢或設定前提 → 可於後方追記欄輸入對話前提", value: "__setask__" },
-                    { name: "清除前提與記憶", value: "__clsask__" },
-                ];
-                const filtered = choices.filter(choice => choice.name.startsWith(focused));
-                await interaction.respond(filtered);
-                return;
-            }
-
-            if (focusedOption.name === "追記") {
-                const query = interaction.options._hoistedOptions.find(opt => opt.name === "提問")?.value;
-                const isQuery = ["__setask__", "__clsask__"].includes(query);
-
-                // 不在提問選項內時才提供模型選項
-                if (!isQuery) {
-                    const modelChoices = Object.entries(MODEL_OPTIONS)  // 定義在 askHandler.js 內
-                        .map(([key, value]) => ({
-                            name: `${value.name}：${value.description}`,  // 顯示在選單上的文字
-                            value: key, // 實際傳到指令處理器的值
-                        }))
-                        .filter(choice => choice.name.toLowerCase().includes(focused.toLowerCase()));
-                    await interaction.respond(modelChoices.slice(0, 25)); // Discord 限制最多 25 筆
-                } else {
-                    await interaction.respond([]);
-                }
-                return;
+        const handlerGroup = autocompleteHandlers[commandName];
+        const handler = handlerGroup?.[focusedOption.name];
+        if (handler) {
+            try {
+                const results = await handler(focused, interaction);
+                await interaction.respond(results);
+            } catch (err) {
+                if (err.code !== 40060) console.error("[ERROR] Autocomplete Error: ", err);
             }
         }
-
-        if (interaction.commandName === "time") {
-            if (focusedOption.name === "時區") {
-                const zoneChoices = Object.entries(ZONE_OPTIONS)  // 定義在 timestamp.js 內
-                    .map(([key, value]) => ({
-                        name: `${value.country}(${value.label})`,
-                        value: key,
-                    }))
-                    .filter(choice => choice.name.toLowerCase().includes(focused.toLowerCase()));
-                await interaction.respond(zoneChoices.slice(0, 25));
-                return;
-            }
-            if (focusedOption.name === "顯隱") {
-                const choices = [
-                    { name: "顯示", value: "__show__" },
-                    { name: "隱藏", value: "__hide__" },
-                ];
-                const filtered = choices.filter(choice => choice.name.startsWith(focused));
-                await interaction.respond(filtered);
-                return;
-            }
-        }
-
         return;
     }
 
     // 不處理非指令互動
-    if (!interaction.isCommand()) return;
+    if (!interaction.isChatInputCommand()) return;
 
     // /control（僅限 admin）
     if (interaction.commandName === "control") {
@@ -411,7 +417,7 @@ client.on("interactionCreate", async (interaction) => {
     // /help
     if (interaction.commandName === "help") {
         console.log(`[REPLY] ${interaction.user.tag}> 觸發了 /help`);
-        await slashHelp(interaction);
+        await interaction.reply(slashHelp());
         return;
     }
 
@@ -451,7 +457,12 @@ client.on("interactionCreate", async (interaction) => {
 
     // /time
     if (interaction.commandName === "time") {
-        ////
+        const result = theTimestamp(interaction,
+            interaction.options.getString("時間"),
+            interaction.options.getString("時區"),
+            interaction.options.getString("顯隱"),
+        );
+        await interaction.reply(result);
         return;
     }
 });
@@ -496,12 +507,6 @@ client.on("messageCreate", async (message) => {
         if (shouldHandle(content, "!owner")) {
             await handleMsgOwner(content, msg => message.reply(msg));
         }
-    }
-
-    if (shouldHandle(content, "!time")) {
-        const result = await theTimestamp(content);
-        await message.reply(result);
-        console.log(`[REPLY] ${message.author.tag}> ${result}`);
     }
 
     if (shouldHandle(content, "!roll")) {

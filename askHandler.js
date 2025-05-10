@@ -1,4 +1,6 @@
 import fetch from 'node-fetch';  // 用於發送 HTTP 請求
+import dotenv from 'dotenv';
+dotenv.config();
 
 //#region 環境初始化
 

@@ -2,9 +2,8 @@ import { EmbedBuilder } from "discord.js";
 import moment from "moment-timezone";
 
 //#region help
-export async function slashHelp(interaction) {
-    const now = moment();
-    const formattedTime = now.format("YYYYMMDDHHmm");
+export function slashHelp() {
+    const formattedTime = moment().format("YYYYMMDDHHmm");
 
     const reply = `
 **__/help__** - サポちゃん的支援說明！！
@@ -25,8 +24,7 @@ export async function slashHelp(interaction) {
 > **!dice__3d6__ / !dice__1d100__** - 擲骰
 `;
 
-    // 回應訊息並設置為僅使用者可見(ephemeral)
-    await interaction.reply({ content: reply, flags: 64 });
+    return { content: reply, flags: 64 };
 }
 //#endregion
 
@@ -57,7 +55,7 @@ class RollDice {
         if (!result) return;
 
         const embed = new EmbedBuilder()
-            .setColor(0x3498db)
+            .setColor(0x5865f2)
             .setDescription(replacedContent + result.trim());
 
         await message.reply({ embeds: [embed] });

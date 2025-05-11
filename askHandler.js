@@ -30,7 +30,7 @@ export const MODEL_OPTIONS = {
 const modelKeys = Object.keys(MODEL_OPTIONS);
 
 const MAX_DISCORD_REPLY_LENGTH = 1800;  // Discord 單則訊息的字數上限
-const MAX_SEARCH_SUMMARY_LENGTH = 700;  // 網路搜尋結果的字數上限
+const MAX_SEARCH_SUMMARY_LENGTH = 700;  // 輔助搜尋結果的字數上限
 const CONTEXT_TIMEOUT_MINUTES = 10;      // 時限內未互動，進行主題檢查
 const QUEUE_LOCK_TIMEOUT = 10;           // 群組排隊鎖最大逾時
 const MAX_CONTEXT_ROUND = 5;             // 對話記憶上限
@@ -65,6 +65,7 @@ class MemoryManager {
             preset: typeof src.preset === 'string' ? src.preset : '',                               // 對話前提
             summary: typeof src.summary === 'string' ? src.summary : '',                            // 前情摘要
             context: Array.isArray(src.context) ? [...src.context] : [],                            // 最近對話記錄
+            searched: typeof src.searched === 'boolean' ? src.searched : false,                     // 啟用搜尋
             lastInteraction: typeof src.lastInteraction === 'number' ? src.lastInteraction : 0      // 最後對話時間戳
         };
     }
@@ -148,12 +149,14 @@ class MemoryManager {
             Object.assign(groupRecord, {
                 context: [...userRecord.context],
                 summary: userRecord.summary,
+                searched: userRecord.searched,
                 lastInteraction: Date.now()
             });
         }
         Object.assign(userRecord, {
             context: this.cloneRecord().context,
             summary: this.cloneRecord().summary,
+            searched: this.cloneRecord().searched,
             lastInteraction: this.cloneRecord().lastInteraction
         });
 
@@ -267,7 +270,7 @@ class MemoryManager {
             this.queueLock.set(groupId, []);
         }
 
-        console.log(`////[DEBUG] ${groupId}排隊-\`${Date.now()}\``);
+        console.log(`///[DEBUG] ${groupId}排隊-\`${Date.now()}\``);
 
         const timeout = QUEUE_LOCK_TIMEOUT * 1000;  // 逾時上限
         const queue = this.queueLock.get(groupId);  // 取得對應的隊列
@@ -281,7 +284,7 @@ class MemoryManager {
             const wrappedResolve = () => {
                 clearTimeout(timeoutId);  // 中止逾時等待
                 resolve();                // 放行
-                console.log(`////[DEBUG] ${groupId}離隊-\`${Date.now()}\``);
+                console.log(`///[DEBUG] ${groupId}離隊-\`${Date.now()}\``);
             };
 
             // 把 wrappedResolve（解鎖函數）放到隊列中
@@ -302,7 +305,7 @@ class MemoryManager {
                 }
                 reject(new Error(`queueLockEnter timeout (${timeout}ms)`));  // 超時，拒絕這個請求
             }, timeout);
-            console.log(`////[DEBUG] ${groupId}開始排隊-\`${Date.now()}\``);
+            console.log(`///[DEBUG] ${groupId}開始排隊-\`${Date.now()}\``);
         });
     }
 
@@ -316,7 +319,7 @@ class MemoryManager {
 
         const next = queue[0];
         if (next) next(); // 放行下一位
-        console.log(`////[DEBUG] ${groupId}放行-\`${Date.now()}\``);
+        console.log(`///[DEBUG] ${groupId}放行-\`${Date.now()}\``);
     }
 }
 const memoryManager = new MemoryManager();
@@ -393,7 +396,7 @@ export const slashAsk = async (interaction, query, selectedModel) => {
     const userTag = interaction.user.tag;
     const record = memoryManager.getMemory(userId);
     const groupId = memoryManager.getUserGroupId(userId);
-    const timer = new Timer();  // 思考計時
+    const timer = new Timer();  // 階段計時開始
 
     // 開始排隊
     await memoryManager.queueLockEnter(groupId);
@@ -402,7 +405,7 @@ export const slashAsk = async (interaction, query, selectedModel) => {
     const timeoutThreshold = CONTEXT_TIMEOUT_MINUTES * 60 * 1000;
     if (Date.now() - record.lastInteraction > timeoutThreshold && record.context.length > 0) {
         // --- 逾時主題判斷 ---
-        const recentQuestions = record.context.slice(-3).map(item => `Q：${item.q}`).join('\n');
+        const recentQuestions = record.context.slice(-3).map(item => `User:${item.q}`).join('\n');
         // （使用者的先前提問 / 目前輸入 / 這是否屬於相似主題？請僅回答「是」或「否」。）
         const topicCheckPrompt = `User's previous questions:\n${recentQuestions}\n\nCurrent input: ${query}\n\nIs this topic similar? Reply with "Yes" or "No".`;
 
@@ -427,11 +430,15 @@ export const slashAsk = async (interaction, query, selectedModel) => {
     }
     timer.add();  // 主題檢查timer1
 
-    // 網路搜尋提供參考
+    // 輔助搜尋提供參考
+    let isSearched = record.searched;
     if (content.startsWith('?') || content.startsWith('？')) {
         content = content.slice(1).trim();
-        searchSummary = await searchGoogle(content);
+        isSearched = true;
     }
+    if (isSearched) searchSummary = await searchGoogle(content, userId);
+    if (searchSummary) record.searched = true;
+    timer.add();  // 輔助搜尋timer2
 
     // 組合上下文
     const fullPrompt = await composeFullPrompt(userId, content, searchSummary);
@@ -444,17 +451,17 @@ export const slashAsk = async (interaction, query, selectedModel) => {
         await interaction.editReply("目前所有模型皆無回應，請稍後再試。");
         return;
     }
+
     if (useModel !== selectedModel) {
         fallbackNotice = `\`${MODEL_OPTIONS[selectedModel].name} 沒回應\``;
     }
-
     console.log(
         `[REPLY] ${userTag}> \`/ask\` ${content} - \`${MODEL_OPTIONS[selectedModel].name}\`` +
         (useModel !== selectedModel
             ? ` -> \`${MODEL_OPTIONS[useModel].name}\``
             : '')
     );
-    timer.add();  // 詢問模型timer2
+    timer.add();  // 詢問模型timer3
 
     // 儲存對話記憶並處理壓縮
     const newRound = { q: content, a: aiReply };
@@ -470,7 +477,7 @@ export const slashAsk = async (interaction, query, selectedModel) => {
             prevRound.a = await compressTextWithLLM(prevRound.a, COMPRESSION_TARGET_TOKENS.threshold, useModel);
         }
     }
-    timer.add();  // 壓縮對話timer3
+    timer.add();  // 壓縮對話timer4
 
     // 推入最新對話
     record.context.push(newRound);
@@ -486,7 +493,7 @@ export const slashAsk = async (interaction, query, selectedModel) => {
         const summaryResult = await compressTextWithLLM(mergedText, COMPRESSION_TARGET_TOKENS.merge, useModel);
         record.summary = summaryResult;
     }
-    timer.add();  // 摘要記憶timer4
+    timer.add();  // 摘要記憶timer5
 
     // 釋放排隊，準備寫入記憶  
     memoryManager.queueLockLeave(groupId);
@@ -513,8 +520,8 @@ export const slashAsk = async (interaction, query, selectedModel) => {
             memoryManager.setMessageOwner(currentFollowUp.id, userId);
         }
     }
-    timer.add();  // 發送訊息timer5
-    console.info(`[INFO] 主題檢查\`${timer.times[1]}ms\`|詢問模型\`${timer.times[2]}ms\`|壓縮對話\`${timer.times[3]}ms\`|摘要記憶\`${timer.times[4]}ms\`|發送訊息\`${timer.times[5]}ms\`||總耗時\`${timer.times[0]}ms\``);
+    timer.add();  // 發送訊息timer6
+    console.info(`[INFO] 主題檢查\`${timer.times[1]}ms\`|輔助搜尋\`${timer.times[2]}ms\`|詢問模型\`${timer.times[3]}ms\`|壓縮對話\`${timer.times[4]}ms\`|摘要記憶\`${timer.times[5]}ms\`|發送訊息\`${timer.times[6]}ms\`||總耗時\`${timer.times[0]}ms\``);
 };
 
 // ASK 加入或建立話題群組
@@ -539,16 +546,14 @@ export const replyAsk = async (message, messageId) => {
     const sentMessage = await message.reply("https://cdn.discordapp.com/attachments/876975982110703637/1368209561240080434/think.gif");
 
     let aiReply = '', modelName = '', searchSummary = '';
-    const timer = new Timer();  // 思考計時
+    const timer = new Timer();  // 階段計時開始
 
     // 開始排隊
     await memoryManager.queueLockEnter(newGroup);
 
-    // 網路搜尋提供參考
-    if (content.startsWith('?') || content.startsWith('？')) {
-        content = content.slice(1).trim();
-        searchSummary = await searchGoogle(content);
-    }
+    // 輔助搜尋提供參考
+    if (memoryManager.getMemory(userId).searched) searchSummary = await searchGoogle(content, userId);
+    timer.add();  // 輔助搜尋timer1
 
     // 組合上下文
     const fullPrompt = await composeFullPrompt(userId, content, searchSummary);
@@ -561,10 +566,8 @@ export const replyAsk = async (message, messageId) => {
         await sentMessage.edit("目前所有模型皆無回應，請稍後再試。");
         return;
     }
-    console.log(
-        `[REPLY] ${userTag}> \`reply msg\` ${content} - \`${MODEL_OPTIONS[useModel].name}\` \`(took ${Date.now() - startTime} ms)\``
-    );
-    timer.add();  // 詢問模型timer1
+    console.log(`[REPLY] ${userTag}> \`reply msg\` ${content} - \`${MODEL_OPTIONS[useModel].name}\``);
+    timer.add();  // 詢問模型timer2
 
     // 儲存對話記憶並處理壓縮
     const record = memoryManager.getMemory(userId);
@@ -581,7 +584,7 @@ export const replyAsk = async (message, messageId) => {
             prevRound.a = await compressTextWithLLM(prevRound.a, COMPRESSION_TARGET_TOKENS.threshold, useModel);
         }
     }
-    timer.add();  // 壓縮對話timer2
+    timer.add();  // 壓縮對話timer3
 
     // 推入最新對話
     record.context.push(newRound);
@@ -610,8 +613,8 @@ export const replyAsk = async (message, messageId) => {
             memoryManager.setMessageOwner(currentFollowUp.id, userId);
         }
     }
-    timer.add();  // 發送訊息timer3
-    console.info(`[INFO] 詢問模型\`${timer.times[1]}ms\`|壓縮對話\`${timer.times[2]}ms\`|發送訊息\`${timer.times[3]}ms\`||總耗時\`${timer.times[0]}ms\``);
+    timer.add();  // 發送訊息timer4
+    console.info(`[INFO] 輔助搜尋\`${timer.times[1]}ms\`|詢問模型\`${timer.times[2]}ms\`|壓縮對話\`${timer.times[3]}ms\`|發送訊息\`${timer.times[4]}ms\`||總耗時\`${timer.times[0]}ms\``);
 };
 
 // 調試記憶體內容
@@ -627,6 +630,7 @@ __UserId__: ${userId}
 > Preset: ${record.preset || ' -'}
 > Summary: ${record.summary || ' -'}
 > Context: ${record.context.length > 0 ? JSON.stringify(record.context, null, 2).split('\n').map(line => `> ${line}`).join('\n') : ' -'}
+> Searched: ${record.searched || ' -'}
 > Last Interaction: ${record.lastInteraction || ' -'}`
     });
     fullContent += '\n============\n';
@@ -637,6 +641,7 @@ __GroupId__: ${groupId}
 > Participants: ${Array.from(groupRecord.participants).join(', ') || ' -'}
 > Summary: ${groupRecord.summary || ' -'}
 > Context: ${groupRecord.context.length > 0 ? JSON.stringify(groupRecord.context, null, 2).split('\n').map(line => `> ${line}`).join('\n') : ' -'}
+> Searched: ${record.searched || ' -'}
 > Last Interaction: ${groupRecord.lastInteraction || ' -'}`
     });
     fullContent += '\n============\n';
@@ -717,16 +722,31 @@ const askLLM = async (query, model) => {
 };
 
 // 搜尋網路參考
-const searchGoogle = async (query) => {
-    const endpoint = 'https://www.googleapis.com/customsearch/v1';
-    const url = `${endpoint}?key=${process.env.GOOGLE_SEARCH_API_KEY}&cx=${process.env.GOOGLE_SEARCH_CSE_ID}&q=${encodeURIComponent(query)}`;
+const searchGoogle = async (query, userId) => {
 
+    // 取得之前提問
+    const recentQuestions = memoryManager.userMemory.get(userId).context.slice(-3).map(item => `${item.q}`).join('\n');
+
+    // 以下是最近的對話內容：
+    // 目前使用者的提問是：
+    // 請將目前的問題重寫為適合用於 Google 搜尋的精簡且精準的搜尋查詢字串。僅回傳改寫後的搜尋查詢即可。
+    const prompt = `${recentQuestions.trim()
+        ? `Here is the recent conversation context:\n${recentQuestions}\n\nThe current user question is:`
+        : `The following is the user's question:`
+        }\n${query}\n\nPlease rewrite the current question as a concise and precise search query suitable for Google Search. Return only the improved search query.`;
+
+    const searchAnswer = (await askLLM(prompt, useModel))?.trim() || '';
+    if (!searchAnswer) return '';
+
+    const endpoint = 'https://www.googleapis.com/customsearch/v1';
+    const url = `${endpoint}?key=${process.env.GOOGLE_SEARCH_API_KEY}&cx=${process.env.GOOGLE_SEARCH_CSE_ID}&q=${encodeURIComponent(searchAnswer)}`;
     try {
         const response = await fetch(url);
         const data = await response.json();
 
         if (!data.items || data.items.length === 0) {
-            return '找不到相關的搜尋結果。';
+            console.warn('[WARN] 找不到相關的搜尋結果。');
+            return '';
         }
 
         // 取前 3 筆結果
@@ -738,17 +758,17 @@ const searchGoogle = async (query) => {
         return splitDiscordMessage(summary, MAX_SEARCH_SUMMARY_LENGTH)[0];
     } catch (error) {
         console.error('[ERROR] 搜尋時發生錯誤：', error);
-        return '搜尋時發生錯誤，請稍後再試。';
+        return '';
     }
 };
 
 // 組合完整 prompt
-const composeFullPrompt = async (userId, currentQuestion, searchSummary = "") => {
+const composeFullPrompt = async (userId, currentQuestion, searchSummary = '') => {
     const record = memoryManager.getMemory(userId);
     const { preset, context, summary } = record;
 
-    // （你是一個 Discord 助理。簡潔地回應並遵循使用者的前提或指示。所有對話皆為你與使用者之間的互動。使用使用者的語言；若為中文則使用繁體中文。）
-    const instruction = "(You are a Discord assistant. Respond concisely and follow the user's premise or instructions. All dialogue is between you and the user. Use the user's language; use Traditional Chinese if it's Chinese.)";
+    // （你是一個助理。簡潔地回應並遵循使用者的前提或指示。所有對話皆為你與使用者之間的互動。使用使用者的語言；若為中文則使用繁體中文。）
+    const instruction = "(You are a assistant. Respond concisely and follow the user's premise or instructions. All dialogue is between you and the user. Use the user's language; use Traditional Chinese if it's Chinese.)";
     const formattedSummary = summary ? `[Summary]\n${summary}` : "";
     const formattedContext = context.length > 0
         ? `[History]\n` +
@@ -761,8 +781,9 @@ const composeFullPrompt = async (userId, currentQuestion, searchSummary = "") =>
         preset && `[Premise]\n${preset}`,
         formattedSummary,
         formattedContext,
-        searchSummary ? `[Search]\n(Use the search results below if helpful, but don't mention or refer to them.)\n${searchSummary}` : '',  // （如果下方的搜尋結果有幫助可以使用，但不要提及或引用它們。）
-        `[User's Current Input]\nUser: ${currentQuestion}\n\n(Continue the conversation.)`  // （繼續對話）
+        // （以下是來自不同來源的搜尋結果摘要。你可以根據這些資訊來協助回答，但請不要提及或引用這些來源。）
+        searchSummary ? `[Search]\n(The following are summaries of search results from different sources. Use them if helpful, but do not mention or refer to the sources directly.)\n${searchSummary}` : '',
+        `[User's Current Input]\nUser: ${currentQuestion}\n\n(Please continue naturally.)`  // （請自然地延續對話）
     ].filter(Boolean).join("\n\n");
 
     if (process.env.DEBUG_FULLPROMPT === "true") {

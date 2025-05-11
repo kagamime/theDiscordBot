@@ -73,8 +73,11 @@ class RollSomething {
         }
     }
 
+    // !roll 隨機排序
     async _handleChoiceRoll(lines, message) {
-        const title = lines[0].slice(5).trim(); // 去掉 "!roll "
+        // 去掉 !roll 跟句尾標點符號
+        const title = lines[0].replace(/^!roll\s*/i, '').replace(/[\u3000-\u303F\uFF00-\uFFEF\u2000-\u206F\s\p{P}]+$/gu, '').trim();
+
         const options = lines.slice(1).filter(line => line.trim());
         if (!title || options.length < 2) {
             await message.reply('請輸入題目，並提供至少兩個選項！！ 範例：\n\`!roll 午餐吃啥\n麵\n飯\`');
@@ -82,7 +85,7 @@ class RollSomething {
         }
 
         const shuffled = options.sort(() => Math.random() - 0.5);
-        const intro = `\` ${title}？？ 遇事不決，サポちゃん幫你骰一個！！ \``;
+        const intro = `\` ${title}？？ 遇事不決，サポちゃん幫你骰一個！！\``;
         this.rollRecord = `!roll ${title}`;
 
         let content = intro;
@@ -99,7 +102,6 @@ class RollSomething {
         }
         console.log(`[FUNC] ${message.author.tag}> \`!roll\` ${lines[0]}`);
     }
-
 
     // !rollXdY
     _rollDice(content, message) {

@@ -61,7 +61,7 @@ app.on('error', (error) => {
     console.error('[ERROR] Express 伺服器錯誤：', error);
 });
 client.on('error', (error) => {
-    console.error('[ERROR] Discord Client 發生錯誤：', error); ////send log 長度問題??
+    console.error('[ERROR] Discord Client 發生錯誤：', error); ////send log 長度問題?? 長文進歷史後
 });
 
 // 覆寫 console.log，使其同時發送到 Discord

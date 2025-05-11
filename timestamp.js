@@ -212,32 +212,38 @@ function parseAbsoluteTime(timeInput, zoneSetKey, zoneUserKey, visibility) {
     // 時間格式
     const formats = [
         'YYYYMMDDHHmm',  // 完整日期時間格式
-        'MMDDHHmm',      // 月日小時分鐘
         'YYYY-MM-DD HH:mm',
         'YYYY/MM/DD HH:mm',
+        'MMDDHHmm',      // 月日小時分鐘
         'MM-DD HH:mm',
         'MM/DD HH:mm',
         'HH:mm',
     ];
 
     let parsed = null;
+    let checkCount = 1;
     // 嘗試不同格式解析 timeInput
     for (const fmt of formats) {
         parsed = moment.tz(timeInput, fmt, true, ALL_ZONE_OPTIONS[inputZoneKey].timezone);
         if (parsed.isValid()) {
-            if (!parsed.year()) parsed.year(now.year());
-            if (!parsed.month() && parsed.month() !== 0) parsed.month(now.month()); // 0 是一月，要保留
-            if (!parsed.date()) parsed.date(now.date());
+            switch (checkCount) {
+                case 7:
+                    parsed.month(now.month());
+                    parsed.date(now.date());
+                case 6:
+                case 5:
+                case 4:
+                    parsed.year(now.year());
+            }
             break;
         }
+        checkCount++;
     }
-
-    console.log(`////timeInput+:${timeInput} | parsed:${parsed} | now.date:${now.date()}`); // 日期可能有問題，凌晨2時再測試
 
     if (!parsed || !parsed.isValid()) return null;
     const result = Math.floor(parsed.valueOf() / 1000);
 
-    // return (開頭！) ? timestamp : string
+    // return [開頭！] ? timestamp : string
     if (inputZoneKey === zoneSetKey) {
         return visibility
             ? `<t:${result}:t> - 於<t:${result}:R>`

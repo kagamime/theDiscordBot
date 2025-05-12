@@ -666,11 +666,15 @@ export const handleMsgOwner = async (content, replyFunc) => {
     const args = content.trim().split(/\s+/); // 切割空白
 
     if (args.length < 2) {
-        return replyFunc("❌ 格式錯誤：請使用 `!msgOwner <msgId> [userId]`");
+        return replyFunc("test");
     }
 
     const msgId = args[1];
     const userId = args[2]; // 可選
+
+    if (!/^\d{17,20}$/.test(msgId)) {
+        return replyFunc("❌ 格式錯誤：請使用 `!test <msgId> [userId]` 移轉對話所有權");
+    }
 
     try {
         memoryManager.changeMessageOwner(msgId, userId);

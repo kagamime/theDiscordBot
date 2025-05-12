@@ -220,6 +220,15 @@ const theCommands = [
         name: "help",
         description: "サポちゃん的支援說明！！",
         dm_permission: false,
+        options: [
+            {
+                name: "分項",
+                description: "子項目說明",
+                type: 3,
+                required: false,
+                autocomplete: true,
+            },
+        ],
     },
     {
         name: "ask",
@@ -293,6 +302,16 @@ const autocompleteHandlers = {
                     value: "__fullpromptlog__"
                 },
                 { name: "終止執行 theDiscordBot", value: "__stopthediscordbot__" },
+            ];
+            return choices.filter(c => c.name.startsWith(focused));
+        }
+    },
+    help: {
+        分項: async (focused) => {
+            const choices = [
+                { name: "/ask", value: "__ask__" },
+                { name: "/time", value: "__time__" },
+                { name: "!roll", value: "__roll__" },
             ];
             return choices.filter(c => c.name.startsWith(focused));
         }
@@ -417,7 +436,7 @@ client.on("interactionCreate", async (interaction) => {
     // /help
     if (interaction.commandName === "help") {
         console.info(`[GET] ${interaction.user.tag}> 觸發了 \`/help\``);
-        await interaction.reply(slashHelp());
+        await interaction.reply(slashHelp(interaction.options.getString("分項")));
         return;
     }
 
@@ -504,7 +523,7 @@ client.on("messageCreate", async (message) => {
         }
 
         // 測試用途
-        if (shouldHandle(content, "!owner")) {
+        if (shouldHandle(content, "!test")) {
             await handleMsgOwner(content, msg => message.reply(msg));
         }
     }

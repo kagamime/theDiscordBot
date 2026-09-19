@@ -529,7 +529,7 @@ client.on("messageCreate", async (message) => {
     }
 
     // 各種骰
-    if (shouldHandle(content, "!roll")) {
+    if (shouldHandle(content, "!roll") || shouldHandle(content, "！roll")) {
         await theRoll(content, message);
     }
 });

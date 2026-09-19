@@ -77,8 +77,8 @@ export function slashHelp(section = '') {
 class RollSomething {
     constructor() {
         this.rules = [
-            [/!roll(?!.*[<>])\s*(\d+d\d+(?:\s*[\+-]\s*\d+d\d+)*(?:\s*[\+-]\s*\d+)?)/gi, this._handleCompositeDice],  // 基本骰、複合骰、加減運算
-            [/!roll\s*(\d+)\s*d\s*(\d+)\s*([<>])\s*(\d+)/gi, this._handleSuccessDice],  // 成功/失敗判定骰
+            [/[!！]roll(?!.*[<>])\s*(\d+d\d+(?:\s*[\+-]\s*\d+d\d+)*(?:\s*[\+-]\s*\d+)?)/gi, this._handleCompositeDice],  // 基本骰、複合骰、加減運算
+            [/[!！]roll\s*(\d+)\s*d\s*(\d+)\s*([<>])\s*(\d+)/gi, this._handleSuccessDice],  // 成功/失敗判定骰
         ];
         this.rollRecord = '';
     }
@@ -91,14 +91,14 @@ class RollSomething {
             return await message.reply(tryRollDice);
         }
         // 如果是抉擇重骰
-        else if (content.trim() === '!roll' && this.rollRecord !== '') {
+        else if (content.trim() === '!roll' || content.trim() === '！roll') {
             console.log(`[FUNC] ${message.author.tag}> \`!roll\``);
             return await this._handleChoiceRoll(this.rollRecord.trim().split('\n'), message);
         }
         // 如果是抽選抉擇
         else {
             const lines = content.trim().split('\n');
-            if (/^!roll\s*\S/.test(lines[0]) && lines.length > 0) {
+            if (/^[!！]roll/.test(lines[0]) && lines.length > 0) {
                 return await this._handleChoiceRoll(lines, message);
             }
         }
@@ -107,11 +107,11 @@ class RollSomething {
     // !roll 隨機抽選排序
     async _handleChoiceRoll(lines, message) {
         // 去掉 !roll 跟句尾標點符號
-        const title = lines[0].replace(/^!roll\s*/i, '').replace(/[\u3000-\u303F\uFF00-\uFFEF\u2000-\u206F\s\p{P}]+$/gu, '').trim();
+        const title = lines[0].replace(/^[!！]roll\s*/i, '').replace(/[\u3000-\u303F\uFF00-\uFFEF\u2000-\u206F\s\p{P}]+$/gu, '').trim();
 
         const options = lines.slice(1).filter(line => line.trim());
         if (!title || options.length < 2) {
-            await message.reply('請輸入題目，並提供至少兩個選項！！ 範例：\n\`!roll 午餐吃啥\n麵\n飯\`');
+            await message.reply('請輸入題目，並提供至少兩個選項！！ 範例：\n\```!roll 午餐吃啥\n麵\n飯\```');
             return;
         }
 
@@ -126,7 +126,7 @@ class RollSomething {
         let count = 1;
         for (const option of shuffled) {
             await new Promise(res => setTimeout(res, delay));
-            content += `\n> ${count++}. ${option}！！`;
+            content += `\n${count === 1 ? '>>> **' : ''}${count}. ${option}${count++ === 1 ? '！！**' : ''}`;
             this.rollRecord += `\n${option}`;
             await sent.edit(content);
             delay = Math.max(delay / 2, 100); // 不小於 100ms

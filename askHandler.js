@@ -6,25 +6,30 @@ dotenv.config();
 
 // 模型清單，鍵名作為 enum 選項值
 export const MODEL_OPTIONS = {
-    gemini_2_0_flash: {
-        name: 'gemini-2.0-flash',
-        description: "低延遲的模型，適合快速回答，訓練資料截至 2023 年初。",
+    gemini_3_6_flash: {
+        name: 'gemini-3.6-flash',
+        description: "通用型模型，速度快，適合一般問答、複雜推理與程式相關問題；知識截止 2025 年 1 月。",
         handler: askGemini,
     },
-    gemini_2_0_pro_exp: {
-        name: 'gemini-2.0-pro-exp',
-        description: "高品質回應模型，適合深度對話，訓練資料截至 2023 年初。",
+    openchat_4o_mini: {
+        name: 'openai/gpt-4o-mini',
+        description: "輕量型模型，速度快、成本低，適合一般問答與簡單任務；知識截止 2023 年 10 月。",
+        handler: askOpenrouter,
+    },
+    gemini_3_5_flash_lite: {
+        name: 'gemini-3.5-flash-lite',
+        description: "輕量型模型，優先速度與低資源消耗，適合簡單問答與大量請求；知識截止 2025 年 1 月。",
         handler: askGemini,
     },
     openchat_3_5_turbo: {
         name: 'openai/gpt-3.5-turbo',
-        description: "輕量優化版 ChatGPT，訓練資料截至 2021 年。",
+        description: "較舊的輕量型聊天模型，適合簡單問答；能力與知識均較新模型有限；知識截止 2021 年 9 月。",
         handler: askOpenrouter,
     },
-    openchat_7b: {
-        name: 'openchat/openchat-7b',
-        description: "OpenChat 7B（免費版），相當於基礎 GPT-3.5，訓練資料截至 2023 年中。",
-        handler: askOpenrouter,
+    gemini_3_8_flash: {
+        name: 'gemini-3.8-flash',
+        description: "高階 Flash 模型，強調複雜推理、程式與長流程任務；較適合需要較高能力的問題；知識截止 2025 年 1 月。",
+        handler: askGemini,
     },
 };
 const modelKeys = Object.keys(MODEL_OPTIONS);

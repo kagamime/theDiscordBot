@@ -771,12 +771,12 @@ const composeFullPrompt = async (userId, currentQuestion, searchSummary = '') =>
     const record = memoryManager.getMemory(userId);
     const { preset, context, summary } = record;
 
-    // （你是一個助理。簡潔地回應並遵循使用者的前提或指示。所有對話皆為你與使用者之間的互動。使用使用者的語言；若為中文則使用繁體中文。）
-    const instruction = "(You are a assistant. Respond concisely and follow the user's premise or instructions. All dialogue is between you and the user. Use the user's language; use Traditional Chinese if it's Chinese.)";
+    // （自然且簡潔地回應使用者目前的輸入。以下歷史對話僅供參考，不要在回應中重現其對話格式或角色標籤。遵循使用者的前提或指示。使用使用者的語言；若為中文則使用繁體中文。）
+    const instruction = "(Respond naturally and concisely to the user's current input. The history below is provided only as context; do not reproduce its dialogue format or role labels in your response. Follow the user's premise or instructions. Use the user's language; use Traditional Chinese if it's Chinese.)";
     const formattedSummary = summary ? `[Summary]\n${summary}` : "";
     const formattedContext = context.length > 0
         ? `[History]\n` +
-        context.map(item => `User: ${item.q}\nYou: ${item.a}`).join("\n\n")
+        context.map(item => `User: ${item.q}\nAssistant: ${item.a}`).join("\n\n")
         : "";
 
     // 前提 + 前情摘要 + 上下文 + 搜尋結果 + 當前提問
@@ -787,7 +787,7 @@ const composeFullPrompt = async (userId, currentQuestion, searchSummary = '') =>
         formattedContext,
         // （以下是來自不同來源的搜尋結果摘要。你可以根據這些資訊來協助回答，但請不要提及或引用這些來源。）
         searchSummary ? `[Search]\n(The following are summaries of search results from different sources. Use them if helpful, but do not mention or refer to the sources directly.)\n${searchSummary}` : '',
-        `[User's Current Input]\nUser: ${currentQuestion}\n\n(Please continue naturally.)`  // （請自然地延續對話）
+        `[User's Current Input]\n${currentQuestion}\n\n(Respond directly to this input. Do not include role labels such as "User:" or "Assistant:".)` // （直接回應此輸入。不要在回應中加入「User:」或「Assistant:」等角色標籤。）
     ].filter(Boolean).join("\n\n");
 
     if (process.env.DEBUG_FULLPROMPT === "true") {

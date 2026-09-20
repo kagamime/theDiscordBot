@@ -1,7 +1,7 @@
 import { Client, GatewayIntentBits, REST, Routes } from "discord.js";
 import { MODEL_OPTIONS, setAsk, clsAsk, slashAsk, replyAsk, replyMemory, handleMsgOwner } from "./askHandler.js";
 import { theTimestamp, ZONE_OPTIONS } from "./timestamp.js";
-import { slashHelp, theRoll } from "./misc.js";
+import { slashHelp, theRoll, theUrl } from "./misc.js";
 import express from "express";
 import dotenv from "dotenv";
 dotenv.config();
@@ -531,6 +531,11 @@ client.on("messageCreate", async (message) => {
     // 各種骰
     if (shouldHandle(content, "!roll") || shouldHandle(content, "！roll")) {
         await theRoll(content, message);
+    }
+
+    // 網址轉譯
+    if (content.includes("https://")) {
+        await theUrl(content, msg => message.reply(msg));
     }
 });
 

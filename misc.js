@@ -233,3 +233,53 @@ class RollSomething {
 const rollSomething = new RollSomething();
 export const theRoll = rollSomething.roll.bind(rollSomething);
 //#endregion
+
+// 網址轉譯
+export const theUrl = async (content, replyFunc) => {
+    //const args = content.trim().split(/\s+/); // 切割空白
+
+    const urlRules = [
+        {
+            regex: /https?:\/\/(?:www\.)?x\.com\/\S+/gi,
+            convert: url => url.replace(
+                /https?:\/\/(?:www\.)?x\.com/i,
+                'https://vxtwitter.com'
+            )
+        },
+        {
+            regex: /https?:\/\/(?:www\.)?facebook\.com\/\S+/gi,
+            convert: url => url.replace(
+                /https?:\/\/(?:www\.)?facebook\.com/i,
+                'https://facebed.com'
+            )
+        },
+        {
+            regex: /https?:\/\/(?:www\.)?instagram\.com\/\S+/gi,
+            convert: url => url.replace(
+                /https?:\/\/(?:www\.)?instagram\.com/i,
+                'https://toinstagram.com'
+            )
+        },
+        {
+            regex: /https?:\/\/(?:www\.)?pixiv\.net\/\S+/gi,
+            convert: url => url.replace(
+                /https?:\/\/(?:www\.)?pixiv\.net/i,
+                'https://www.phixiv.net'
+            )
+        }
+    ];
+
+    const results = [];
+
+    for (const rule of urlRules) {
+        const matches = content.match(rule.regex);
+        if (matches) {
+            results.push(...matches.map(rule.convert));
+        }
+    }
+
+    if (results.length > 0) {
+        return replyFunc(results.join('\n'));
+    }
+};
+//#endregion

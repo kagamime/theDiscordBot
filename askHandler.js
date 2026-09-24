@@ -354,13 +354,13 @@ export const setAsk = async (interaction, content) => {
 
     if (!content || !content.trim()) {
         if (preset) {
-            console.info(`[GET] ${userTag}>查詢前提：${preset}`);
+            console.info(`[GET] \`${userTag}\`> 查詢前提：${preset}`);
             await interaction.editReply({
                 content: `\`目前的對話前提：\`\n>>> ${preset}`,
                 flags: 64,
             });
         } else {
-            console.info(`[GET] ${userTag}>查詢前提：（尚未設定）`);
+            console.info(`[GET] \`${userTag}\`> 查詢前提：（尚未設定）`);
             await interaction.editReply({
                 content: `\`目前還沒有對話前提！！\``,
                 flags: 64,
@@ -372,7 +372,7 @@ export const setAsk = async (interaction, content) => {
     // 有傳入內容，設定新的前提
     preset = content.trim();
     memoryManager.setUserPreset(userId, preset);
-    console.info(`[SET] ${userTag}>設定前提：${preset}`);
+    console.info(`[SET] \`${userTag}\`> 設定前提：${preset}`);
     await interaction.editReply({
         content: `\`已設定對話前提！！\`\n>>> ${preset}`,
         flags: 64,
@@ -384,7 +384,7 @@ export const clsAsk = async (interaction) => {
     await interaction.deferReply({ flags: 64 });  // 告知 Discord 延遲回應，且回應為隱藏
     memoryManager.removeUserFromGroup(interaction.user.id);
     memoryManager.userMemory.delete(interaction.user.id);
-    console.info(`[SET] ${interaction.user.tag}>清除前提記憶`);
+    console.info(`[SET] \`${interaction.user.tag}\`> 清除前提記憶`);
     await interaction.editReply(`\`已清除對話前提與記憶！！\``);
 };
 
@@ -426,7 +426,7 @@ export const slashAsk = async (interaction, query, selectedModel) => {
                     record.summary = memoryManager.cloneRecord().summary;
                     memoryManager.setMemory(userId, record);
                 }
-                console.info(`[SET] ${userTag}>主題變更，清除記憶：`);
+                console.info(`[SET] \`${userTag}\`> 主題變更，清除記憶：`);
             }
         } catch (err) {
             console.warn(`[WARN] 主題判斷失敗：${err.message}`);
@@ -461,7 +461,7 @@ export const slashAsk = async (interaction, query, selectedModel) => {
         fallbackNotice = `\`${MODEL_OPTIONS[selectedModel].name} 沒回應\``;
     }
     console.log(
-        `[REPLY] ${userTag}> \`/ask\` ${content} - \`${MODEL_OPTIONS[selectedModel].name}\`` +
+        `[REPLY] \`${userTag}\`> \`/ask\` ${content} - \`${MODEL_OPTIONS[selectedModel].name}\`` +
         (useModel !== selectedModel
             ? ` -> \`${MODEL_OPTIONS[useModel].name}\``
             : '')
@@ -571,7 +571,7 @@ export const replyAsk = async (message, messageId) => {
         await sentMessage.edit("目前所有模型皆無回應，請稍後再試。");
         return;
     }
-    console.log(`[REPLY] ${userTag}> \`reply msg\` ${content} - \`${MODEL_OPTIONS[useModel].name}\``);
+    console.log(`[REPLY] \`${userTag}\`> \`reply msg\` ${content} - \`${MODEL_OPTIONS[useModel].name}\``);
     timer.add();  // 詢問模型timer2
 
     // 儲存對話記憶並處理壓縮
@@ -730,11 +730,11 @@ const askLLM = async (query, model) => {
     return answer;
 };
 
-// 搜尋網路參考
+// 搜尋網路參考 ////失效，尋找其他 Web Search API 取代
 const searchGoogle = async (query, userId) => {
 
     // 取得之前提問
-    const recentQuestions = memoryManager.userMemory.get(userId).context.slice(-3).map(item => `${item.q}`).join('\n');
+    const recentQuestions = memoryManager.userMemory.get(userId)?.context.slice(-3).map(item => `${item.q}`).join('\n') || "";
 
     // 以下是最近的對話內容：
     // 目前使用者的提問是：

@@ -398,7 +398,7 @@ client.on("interactionCreate", async (interaction) => {
         switch (option) {
             case "__replymemory__":
                 await replyMemory(interaction);
-                console.info(`[GET] ${interaction.user.tag}> 調試記憶體內容`);
+                console.info(`[GET] \`${interaction.user.tag}\`> 調試記憶體內容`);
                 break;
             case "__cronjobconnectlog__":
                 // 切換顯示 Cron-Job 連線 Log
@@ -407,7 +407,7 @@ client.on("interactionCreate", async (interaction) => {
                     content: process.env.DEBUG_CRONJOB_CONNECT === "true" ? "已開啟 Cron-Job 連線 Log" : "已關閉 Cron-Job 連線 Log",
                     flags: 64,
                 });
-                console.info(`[SET] ${process.env.DEBUG_CRONJOB_CONNECT === "true" ? "已開啟 Cron-Job 連線 Log" : "已關閉 Cron-Job 連線 Log"}`);
+                console.info(`[SET] \`${interaction.user.tag}\`> ${process.env.DEBUG_CRONJOB_CONNECT === "true" ? "已開啟 Cron-Job 連線 Log" : "已關閉 Cron-Job 連線 Log"}`);
                 break;
             case "__fullpromptlog__":
                 // 切換顯示上下文 Debug Log
@@ -416,7 +416,7 @@ client.on("interactionCreate", async (interaction) => {
                     content: process.env.DEBUG_FULLPROMPT === "true" ? "已開啟上下文 Debug Log" : "已關閉上下文 Debug Log",
                     flags: 64,
                 });
-                console.info(`[SET] ${process.env.DEBUG_FULLPROMPT === "true" ? "已開啟上下文 Debug Log" : "已關閉上下文 Debug Log"}`);
+                console.info(`[SET] \`${interaction.user.tag}\`> ${process.env.DEBUG_FULLPROMPT === "true" ? "已開啟上下文 Debug Log" : "已關閉上下文 Debug Log"}`);
                 break;
             case "__stopthediscordbot__":
                 await interaction.reply({ content: "おやすみなさい．．．", flags: 64, });
@@ -435,7 +435,7 @@ client.on("interactionCreate", async (interaction) => {
 
     // /help
     if (interaction.commandName === "help") {
-        console.info(`[GET] ${interaction.user.tag}> 觸發了 \`/help\``);
+        console.info(`[GET] \`${interaction.user.tag}\`> 觸發了 \`/help\``);
         await interaction.reply(slashHelp(interaction.options.getString("分項")));
         return;
     }
@@ -535,7 +535,10 @@ client.on("messageCreate", async (message) => {
 
     // 網址轉譯
     if (content.includes("https://")) {
-        await theUrl(content, msg => message.reply(msg));
+        const converted = await theUrl(content, msg => message.reply(msg), message.author.tag);
+        if (converted) {
+            await message.suppressEmbeds(); // 轉譯後隱藏原始網址的預覽
+        }
     }
 });
 

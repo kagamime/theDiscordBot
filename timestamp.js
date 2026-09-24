@@ -114,7 +114,7 @@ export function theTimestamp(interaction, timeInput, zoneInput, visibility) {
     }
 
     // 設定回傳的 Embed
-    console.log(`[FUNC] ${interaction.user.tag}> \`/time\` timeInput: ${timeInput}, zoneInput: ${zoneInput}, visibility: ${visibility}`);
+    console.log(`[FUNC] \`${interaction.user.tag}\`> \`/time\` timeInput: ${timeInput}, zoneInput: ${zoneInput}, visibility: ${visibility}`);
     const embed = new EmbedBuilder()
         .setColor(0x5865f2)
         .setDescription(result.trim());

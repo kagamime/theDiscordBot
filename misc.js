@@ -92,7 +92,7 @@ class RollSomething {
         }
         // 如果是抉擇重骰
         else if (content.trim() === '!roll' || content.trim() === '！roll') {
-            console.log(`[FUNC] ${message.author.tag}> \`!roll\``);
+            console.log(`[FUNC] \`${message.author.tag}\`> \`!roll\``);
             return await this._handleChoiceRoll(this.rollRecord.trim().split('\n'), message);
         }
         // 如果是抽選抉擇
@@ -131,7 +131,7 @@ class RollSomething {
             await sent.edit(content);
             delay = Math.max(delay / 2, 100); // 不小於 100ms
         }
-        console.log(`[FUNC] ${message.author.tag}> \`!roll\` ${lines[0]}`);
+        console.log(`[FUNC] \`${message.author.tag}\`> \`!roll\` ${lines[0]}`);
     }
 
     // !rollXdY
@@ -155,7 +155,7 @@ class RollSomething {
             .setColor(0x5865f2)
             .setDescription(replacedContent + result.trim());
 
-        console.log(`[FUNC] ${message.author.tag}> ${content}`);
+        console.log(`[FUNC] \`${message.author.tag}\`> \`${content}\``);
         return { embeds: [embed] };
     }
 
@@ -234,37 +234,43 @@ const rollSomething = new RollSomething();
 export const theRoll = rollSomething.roll.bind(rollSomething);
 //#endregion
 
-// 網址轉譯
-export const theUrl = async (content, replyFunc) => {
-    //const args = content.trim().split(/\s+/); // 切割空白
+//#region 網址轉譯
+export const theUrl = async (content, replyFunc, userTag) => {
 
     const urlRules = [
         {
-            regex: /https?:\/\/(?:www\.)?x\.com\/\S+/gi,
+            regex: /https?:\/\/(?:www\.)?(?:x|twitter)\.com\/\S+/gi,
             convert: url => url.replace(
-                /https?:\/\/(?:www\.)?x\.com/i,
-                'https://vxtwitter.com'
+                /(?:www\.)?(?:x|twitter)\.com/i,
+                'vxtwitter.com'
             )
         },
         {
             regex: /https?:\/\/(?:www\.)?facebook\.com\/\S+/gi,
             convert: url => url.replace(
-                /https?:\/\/(?:www\.)?facebook\.com/i,
-                'https://facebed.com'
+                /(?:www\.)?facebook\.com/i,
+                'facebed.com'
             )
         },
         {
             regex: /https?:\/\/(?:www\.)?instagram\.com\/\S+/gi,
             convert: url => url.replace(
-                /https?:\/\/(?:www\.)?instagram\.com/i,
-                'https://toinstagram.com'
+                /(?:www\.)?instagram\.com/i,
+                'toinstagram.com'
             )
         },
         {
             regex: /https?:\/\/(?:www\.)?pixiv\.net\/\S+/gi,
             convert: url => url.replace(
-                /https?:\/\/(?:www\.)?pixiv\.net/i,
-                'https://www.phixiv.net'
+                /(?:www\.)?pixiv\.net/i,
+                'phixiv.net'
+            )
+        },
+        {
+            regex: /https?:\/\/(?:www\.)?threads\.com\/\S+/gi,
+            convert: url => url.replace(
+                /(?:www\.)?threads\.com/i,
+                'vxthreads.com'
             )
         }
     ];
@@ -279,7 +285,12 @@ export const theUrl = async (content, replyFunc) => {
     }
 
     if (results.length > 0) {
-        return replyFunc(results.join('\n'));
+        console.info(`[FUNC] \`${userTag}\`> 觸發網址轉譯：${results.map(url => `<${url}>`).join(', ')}`);
+        await replyFunc(results.join('\n'));
+
+        return content.match(/https:\/\//g).length
+            === results.join('\n').match(/https:\/\//g).length; // 如果轉譯後的網址數量與原始網址數量相同，則回傳 true，否則回傳 false
     }
+    return false;
 };
 //#endregion

@@ -1,4 +1,4 @@
-import { EmbedBuilder } from "discord.js";
+import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from "discord.js";
 import moment from "moment-timezone";
 
 //#region help
@@ -240,38 +240,23 @@ export const theUrl = async (content, replyFunc, userTag) => {
     const urlRules = [
         {
             regex: /https?:\/\/(?:www\.)?(?:x|twitter)\.com\/\S+/gi,
-            convert: url => url.replace(
-                /(?:www\.)?(?:x|twitter)\.com/i,
-                'vxtwitter.com'
-            )
+            convert: url => url.replace(/(?:www\.)?(?:x|twitter)\.com/i, 'vxtwitter.com')
         },
         {
             regex: /https?:\/\/(?:www\.)?facebook\.com\/\S+/gi,
-            convert: url => url.replace(
-                /(?:www\.)?facebook\.com/i,
-                'facebed.com'
-            )
+            convert: url => url.replace(/(?:www\.)?facebook\.com/i, 'facebed.com')
         },
         {
             regex: /https?:\/\/(?:www\.)?instagram\.com\/\S+/gi,
-            convert: url => url.replace(
-                /(?:www\.)?instagram\.com/i,
-                'toinstagram.com'
-            )
+            convert: url => url.replace(/(?:www\.)?instagram\.com/i, 'toinstagram.com')
         },
         {
             regex: /https?:\/\/(?:www\.)?pixiv\.net\/\S+/gi,
-            convert: url => url.replace(
-                /(?:www\.)?pixiv\.net/i,
-                'phixiv.net'
-            )
+            convert: url => url.replace(/(?:www\.)?pixiv\.net/i, 'phixiv.net')
         },
         {
             regex: /https?:\/\/(?:www\.)?threads\.com\/\S+/gi,
-            convert: url => url.replace(
-                /(?:www\.)?threads\.com/i,
-                'vxthreads.com'
-            )
+            convert: url => url.replace(/(?:www\.)?threads\.com/i, 'vxthreads.com')
         }
     ];
 
@@ -286,7 +271,11 @@ export const theUrl = async (content, replyFunc, userTag) => {
 
     if (results.length > 0) {
         console.info(`[FUNC] \`${userTag}\`> 觸發網址轉譯：${results.map(url => `<${url}>`).join(', ')}`);
-        await replyFunc(results.join('\n'));
+
+        await replyFunc(
+            results.join('\n'),
+            { components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('reflash').setLabel('↺').setStyle(ButtonStyle.Secondary))] }
+        );
 
         return content.match(/https:\/\//g).length
             === results.join('\n').match(/https:\/\//g).length; // 如果轉譯後的網址數量與原始網址數量相同，則回傳 true，否則回傳 false

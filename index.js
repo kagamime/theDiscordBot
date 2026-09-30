@@ -381,6 +381,16 @@ client.on("interactionCreate", async (interaction) => {
         return;
     }
 
+    // 網址轉譯 Reflash Button
+    if (interaction.customId === 'reflash') {
+        await interaction.deferUpdate();
+
+        // 重新編輯訊息以刷新網址轉譯
+        await interaction.message.edit({
+            content: interaction.message.content
+        });
+    }
+
     // 不處理非指令互動
     if (!interaction.isChatInputCommand()) return;
 
@@ -535,7 +545,7 @@ client.on("messageCreate", async (message) => {
 
     // 網址轉譯
     if (content.includes("https://")) {
-        const converted = await theUrl(content, msg => message.reply(msg), message.author.tag);
+        const converted = await theUrl(content, (msg, options) => message.reply({ content: msg, ...options }), message.author.tag);
         if (converted) {
             await message.suppressEmbeds(); // 轉譯後隱藏原始網址的預覽
         }

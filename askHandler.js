@@ -667,11 +667,11 @@ __GroupId__: ${groupId}
 };
 
 // 手動移轉所有權 - 測試用途
-export const handleMsgOwner = async (content, replyFunc) => {
+export const handleMsgOwner = async (content, replyFunc,procId) => {
     const args = content.trim().split(/\s+/); // 切割空白
 
     if (args.length < 2) {
-        return replyFunc("test");
+        return replyFunc(`test\`(${procId})\``);
     }
 
     const msgId = args[1];

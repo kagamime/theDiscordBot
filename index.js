@@ -12,7 +12,10 @@ console.log("___________________________________");
 
 const procId = Date.now().toString().slice(-4);
 let isStoppingBot = false;
-let isCronJobPing = false;
+let isCloudflarePing = false;
+let cloudflareReplyTimer = null;
+const CLOUDFLARE_REPLY_URL = process.env.CLOUDFLARE_REPLY_URL;
+const REPLY_INTERVAL_MINUTES = 5;
 
 // 建立 Discord client 實例
 const client = new Client({
@@ -28,16 +31,14 @@ const app = express();
 
 // 中介處理
 app.use((req, res, next) => {
-    if (isStoppingBot) return res.status(403).end();  // 進入假眠，回應403
-
-    // 收到 cron-job 定時請求
-    if (req.headers['the-cron-job'] === 'true') {
-        if (!isCronJobPing) {
-            isCronJobPing = true;
-            console.info(`[INFO] 確認 cron-job 請求，重啟機制就緒`);
+    // 收到 Cloudflare 回覆請求
+    if (req.headers["cloudflare-reply"] === "true") {
+        if (!isCloudflarePing) {
+            isCloudflarePing = true;
+            console.info("[INFO] 確認 Cloudflare Worker 回覆請求，重啟機制就緒");
         }
-        if (process.env.DEBUG_CRONJOB_CONNECT === "true") {
-            console.info(`[INFO] 收到請求：${req.method} cron-job.org`);
+        if (process.env.DEBUG_CLOUDFLARE_CONNECT === "true") {
+            console.info(`[INFO] 收到回覆請求：${req.method} cloudflare-reply`);
         }
     } else {
         console.info(`[INFO] 收到請求：${req.method} ${req.originalUrl}`);
@@ -79,7 +80,7 @@ const overrideConsole = (type) => {
         const prefix = `\`[${now.replace(':', '')}]\``;
         let message = [prefix, ...args].join('');
 
-        if (args.join('').includes('cron-job.org')) {
+        if (args.join('').includes('cloudflare-reply')) {
             message = `||${message}||`;
         } else {
             original(...args); // 保留原始行為
@@ -151,16 +152,33 @@ client.once("ready", async () => {
     } catch (error) {
         console.error("[ERROR] 重註冊 Slash Command 發生例外：", error);
     }
-
     console.info(`[INFO] ✅ theDiscordBot\`(${procId})\` 已啟動，登入為 ${client.user.tag}`);
+
+    // 定時請求 Cloudflare 回覆
+    if (!CLOUDFLARE_REPLY_URL) {
+        console.info("[INFO] Cloudflare 定時請求排程未啟用");
+    } else {
+        const requestCloudflareReply = async () => {
+            try {
+                await fetch(CLOUDFLARE_REPLY_URL);
+            } catch (err) {
+                console.error(
+                    "[ERROR] 請求 Cloudflare Worker 失敗；請至 https://dash.cloudflare.com/ 檢視部署。",
+                    err
+                );
+            }
+        };
+        requestCloudflareReply(); // 啟動排程前先請求一次
+        cloudflareReplyTimer = setInterval(requestCloudflareReply, REPLY_INTERVAL_MINUTES * 60 * 1000);
+    }
 });
 
 // 監聽 SIGTERM 訊號（Render 停止服務時會發送此信號）
 process.on('SIGTERM', async () => {
     console.info(`[INFO] 已收到 SIGTERM 訊號，準備結束 theDiscordBot\`(${procId})\``);
 
-    // 當接收過 cron-job ping 之後或SIGTERM_REDEPLOY才啟用重啟機制
-    if (isCronJobPing || process.env.SIGTERM_REDEPLOY === 'true') {
+    // 當接收過 Cloudflare 回覆請求之後或SIGTERM_REDEPLOY才啟用重啟機制
+    if (isCloudflarePing || process.env.SIGTERM_REDEPLOY === 'true') {
         console.info('[INFO] 正在重啟部署...');
         try {
             const response = await fetch(process.env.DEPLOY_HOOK_URL, {
@@ -187,7 +205,10 @@ function stopTheDiscordBot() {
     console.info(`[INFO] 🔴 theDiscordBot\`(${procId})\` 停止中...`);
 
     isStoppingBot = true;
-    isCronJobPing = false;
+    isCloudflarePing = false;
+
+    // 移除請求回覆排程
+    clearInterval(cloudflareReplyTimer);
 
     // 停止 Discord Bot
     console.info("[INFO] Discord 已離線");
@@ -290,10 +311,10 @@ const autocompleteHandlers = {
             const choices = [
                 { name: "調試記憶體內容", value: "__replymemory__" },
                 {
-                    name: process.env.DEBUG_CRONJOB_CONNECT === "false"
-                        ? "開啟 Cron-Job 連線 Log"
-                        : "關閉 Cron-Job 連線 Log",
-                    value: "__cronjobconnectlog__"
+                    name: process.env.DEBUG_CLOUDFLARE_CONNECT === "false"
+                        ? "開啟 Cloudflare 連線 Log"
+                        : "關閉 Cloudflare 連線 Log",
+                    value: "__cloudflareconnectlog__"
                 },
                 {
                     name: process.env.DEBUG_FULLPROMPT === "false"
@@ -410,14 +431,14 @@ client.on("interactionCreate", async (interaction) => {
                 await replyMemory(interaction);
                 console.info(`[GET] \`${interaction.user.tag}\`> 調試記憶體內容`);
                 break;
-            case "__cronjobconnectlog__":
-                // 切換顯示 Cron-Job 連線 Log
-                process.env.DEBUG_CRONJOB_CONNECT = process.env.DEBUG_CRONJOB_CONNECT === "true" ? "false" : "true";
+            case "__cloudflareconnectlog__":
+                // 切換顯示 Cloudflare 連線 Log
+                process.env.DEBUG_CLOUDFLARE_CONNECT = process.env.DEBUG_CLOUDFLARE_CONNECT === "true" ? "false" : "true";
                 await interaction.reply({
-                    content: process.env.DEBUG_CRONJOB_CONNECT === "true" ? "已開啟 Cron-Job 連線 Log" : "已關閉 Cron-Job 連線 Log",
+                    content: process.env.DEBUG_CLOUDFLARE_CONNECT === "true" ? "已開啟 Cloudflare 連線 Log" : "已關閉 Cloudflare 連線 Log",
                     flags: 64,
                 });
-                console.info(`[SET] \`${interaction.user.tag}\`> ${process.env.DEBUG_CRONJOB_CONNECT === "true" ? "已開啟 Cron-Job 連線 Log" : "已關閉 Cron-Job 連線 Log"}`);
+                console.info(`[SET] \`${interaction.user.tag}\`> ${process.env.DEBUG_CLOUDFLARE_CONNECT === "true" ? "已開啟 Cloudflare 連線 Log" : "已關閉 Cloudflare 連線 Log"}`);
                 break;
             case "__fullpromptlog__":
                 // 切換顯示上下文 Debug Log
@@ -534,7 +555,7 @@ client.on("messageCreate", async (message) => {
 
         // 測試用途
         if (shouldHandle(content, "!test")) {
-            await handleMsgOwner(content, msg => message.reply(msg));
+            await handleMsgOwner(content, msg => message.reply(msg), procId);
         }
     }
 
